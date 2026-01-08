@@ -51,6 +51,9 @@ create_config_files "${DEPS_INDEX_DIR}" "${BUILD_DIR}"
 if [ ! -f "${BUILD_DIR}/.goose-config.yml" ] && [ ! -f "${BUILD_DIR}/.goose-config.yaml" ]; then
     echo "       Checking for config in JAR files..."
     
+    # Debug: List what's in BUILD_DIR
+    echo "       BUILD_DIR contents: $(ls -la "${BUILD_DIR}" 2>/dev/null | head -20)"
+    
     # First, check if this is an exploded Spring Boot JAR (Java buildpack explodes JARs)
     if [ -f "${BUILD_DIR}/BOOT-INF/classes/.goose-config.yml" ]; then
         echo "       Found .goose-config.yml in exploded JAR (BOOT-INF/classes/)"

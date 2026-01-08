@@ -316,8 +316,8 @@ validate_mcp_config() {
 configure_goose() {
     local build_dir=$1
 
-    # Parse configuration file
-    parse_goose_config "${build_dir}"
+    # Parse configuration file (optional - continue even if not found)
+    parse_goose_config "${build_dir}" || echo "       No .goose-config.yml found, using defaults"
 
     # Generate profiles.yaml
     generate_profiles_yaml "${build_dir}"
