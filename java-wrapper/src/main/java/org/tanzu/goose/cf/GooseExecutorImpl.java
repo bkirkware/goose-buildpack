@@ -392,7 +392,7 @@ public class GooseExecutorImpl implements GooseExecutor {
                 );
             }
 
-            String result = output.toString();
+            String result = filterGooseBanner(output.toString());
             logger.info("Goose session '{}' executed successfully, output length: {}", sessionName, result.length());
             return result;
 
@@ -452,8 +452,9 @@ public class GooseExecutorImpl implements GooseExecutor {
                     new InputStreamReader(process.getInputStream())
             );
 
-            // Return stream with proper cleanup handlers
+            // Return stream with proper cleanup handlers, filtering out banner lines
             return reader.lines()
+                    .filter(line -> !isGooseBannerLine(line))
                     .onClose(() -> {
                         logger.debug("Session stream closed, cleaning up resources");
                         handle.close();
@@ -556,6 +557,62 @@ public class GooseExecutorImpl implements GooseExecutor {
         if (sessionName == null || sessionName.trim().isEmpty()) {
             throw new IllegalArgumentException("Session name cannot be null or empty");
         }
+    }
+
+    /**
+     * Check if a line is part of the Goose CLI startup banner.
+     * <p>
+     * The Goose CLI outputs a startup banner like:
+     * <pre>
+     * starting session | provider: openai model: gpt-4o
+     *    session id: 20260108_1
+     *    working directory: /home/vcap/app
+     * </pre>
+     * </p>
+     */
+    private boolean isGooseBannerLine(String line) {
+        if (line == null) {
+            return false;
+        }
+        String trimmed = line.trim();
+        return trimmed.startsWith("starting session |") ||
+               trimmed.startsWith("session id:") ||
+               trimmed.startsWith("working directory:");
+    }
+
+    /**
+     * Filter out Goose CLI banner/startup lines from output.
+     * This method removes banner lines to provide cleaner output.
+     */
+    private String filterGooseBanner(String output) {
+        if (output == null || output.isEmpty()) {
+            return output;
+        }
+        
+        StringBuilder filtered = new StringBuilder();
+        String[] lines = output.split("\n");
+        boolean inBanner = true;
+        
+        for (String line : lines) {
+            // Skip banner lines at the start
+            if (inBanner) {
+                if (isGooseBannerLine(line) || line.trim().isEmpty()) {
+                    continue;
+                }
+                // First non-banner line found
+                inBanner = false;
+            }
+            
+            filtered.append(line).append("\n");
+        }
+        
+        // Trim trailing newlines
+        String result = filtered.toString();
+        while (result.endsWith("\n\n")) {
+            result = result.substring(0, result.length() - 1);
+        }
+        
+        return result;
     }
 
     /**
