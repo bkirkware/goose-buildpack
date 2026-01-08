@@ -2,55 +2,79 @@
 # Sample .goose-config.yml
 # Place this file in your application root to enable Goose buildpack
 
-goose:
-  # Enable Goose CLI installation
-  enabled: true
+# LLM Provider configuration
+# Goose supports multiple providers - set credentials via environment variables
+provider: anthropic
+model: claude-sonnet-4-20250514
 
-  # Goose CLI version
-  # Use "stable" for the stable release, or specify a version like "v1.19.0"
-  version: "stable"
+# Goose CLI version (optional)
+# Use "stable" for the stable release, or specify a version like "v1.19.0"
+version: "stable"
 
-  # LLM Provider configuration
-  # Goose supports multiple providers - set credentials via environment variables
-  provider: anthropic
-  model: claude-sonnet-4-20250514
+# Log level for Goose CLI (optional)
+logLevel: "info"          # debug, info, warn, error
 
-  # Log level for Goose CLI
-  logLevel: "info"          # debug, info, warn, error
+# Builtin Extensions
+# Enable Goose's built-in extensions for additional capabilities
+#
+# Available builtin extensions:
+#
+#   developer       - File system access (read/write files), shell commands,
+#                     code editing with text_editor, screen capture, list windows,
+#                     code analysis, and image processing
+#
+#   memory          - Persistent memory across sessions. Store and retrieve
+#                     memories by category (local to project or global).
+#                     Useful for remembering user preferences, project context,
+#                     and learned information.
+#
+#   computercontroller - Desktop automation and control. Web scraping, running
+#                        automation scripts (shell, batch, ruby, powershell),
+#                        caching files, reading PDFs/DOCX/XLSX documents.
+#
+#   autovisualiser  - Data visualization tools. Generate charts (bar, line, pie,
+#                     radar, donut), maps, treemaps, chord diagrams, sankey
+#                     diagrams, and mermaid diagrams from data.
+#
+#   tutorial        - Interactive tutorials for learning Goose. Guides users
+#                     through building MCP extensions, creating games, etc.
+#
+extensions:
+  developer:
+    enabled: true
+  # memory:
+  #   enabled: true
+  # computercontroller:
+  #   enabled: true
+  # autovisualiser:
+  #   enabled: true
+  # tutorial:
+  #   enabled: true
 
-  # MCP (Model Context Protocol) Servers
-  # Configure MCP servers to extend Goose capabilities
-  mcpServers: []
+# MCP (Model Context Protocol) Servers
+# Configure remote MCP servers to extend Goose capabilities
+# Note: Only streamable_http transport is supported (SSE is deprecated)
+mcpServers: []
 
-  # Example MCP server configurations:
-  #
-  # Local stdio MCP servers:
-  # mcpServers:
-  #   - name: filesystem
-  #     type: stdio
-  #     command: npx
-  #     args:
-  #       - "-y"
-  #       - "@modelcontextprotocol/server-filesystem"
-  #     env:
-  #       ALLOWED_DIRECTORIES: "/home/vcap/app,/tmp"
-  #
-  #   - name: github
-  #     type: stdio
-  #     command: npx
-  #     args:
-  #       - "-y"
-  #       - "@modelcontextprotocol/server-github"
-  #     env:
-  #       GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
-  #
-  # Remote SSE MCP servers:
-  #   - name: custom-server
-  #     type: streamable_http
-  #     url: "https://mcp-server.example.com/mcp"
-
-  # Extension configuration
-  # extensions:
-  #   developer:
-  #     enabled: true
-
+# Example MCP server configurations:
+#
+# Remote Streaming HTTP MCP servers:
+# mcpServers:
+#   - name: my-mcp-server
+#     type: streamable_http
+#     url: "https://mcp-server.example.com/mcp"
+#
+#   - name: cloud-foundry
+#     type: streamable_http
+#     url: "https://cloud-foundry-mcp-server.example.com/mcp"
+#
+# Local stdio MCP servers (for development/testing):
+# mcpServers:
+#   - name: filesystem
+#     type: stdio
+#     command: npx
+#     args:
+#       - "-y"
+#       - "@modelcontextprotocol/server-filesystem"
+#     env:
+#       ALLOWED_DIRECTORIES: "/home/vcap/app,/tmp"
