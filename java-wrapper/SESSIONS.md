@@ -77,19 +77,23 @@ try (Stream<String> lines = executor.executeInSessionStreaming("session-name", "
 
 ## How It Works
 
-Under the hood, the wrapper invokes Goose CLI with the appropriate session flags:
+Under the hood, the wrapper invokes Goose CLI with the `run` command for non-interactive execution:
 
 **Starting a new session:**
 ```bash
-goose session --name "my-session" --text "Hello" --max-turns 100
+goose run -n "my-session" -t "Hello" --max-turns 100
 ```
 
 **Resuming an existing session:**
 ```bash
-goose session --name "my-session" --resume --text "Follow-up question" --max-turns 100
+goose run -n "my-session" -r -t "Follow-up question" --max-turns 100
 ```
 
-The `--resume` flag tells Goose to load the previous conversation history before processing the new prompt.
+The `-r` (resume) flag tells Goose to load the previous conversation history before processing the new prompt.
+
+> **Note:** We use `goose run` instead of `goose session` because:
+> - `goose session` starts an interactive REPL that waits for user input
+> - `goose run` executes a task non-interactively and exits when complete
 
 ## Session Lifecycle
 
@@ -282,7 +286,7 @@ try {
 |---------|------------------------|------------------------------|
 | Context | No memory | Remembers conversation |
 | Use case | One-off tasks | Multi-turn conversations |
-| CLI command | `goose session --text` | `goose session --name X [--resume] --text` |
+| CLI command | `goose run -t "prompt"` | `goose run -n X [-r] -t "prompt"` |
 | Storage | None | SQLite database |
 
 ## Related Resources

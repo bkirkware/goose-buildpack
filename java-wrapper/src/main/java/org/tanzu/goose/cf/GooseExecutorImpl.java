@@ -495,26 +495,31 @@ public class GooseExecutorImpl implements GooseExecutor {
     /**
      * Build the command line arguments for a named Goose session.
      * <p>
-     * For new sessions: goose session --name "session-name" --text "prompt" --max-turns N
-     * For resuming:     goose session --name "session-name" --resume --text "prompt" --max-turns N
+     * For new sessions: goose run -n "session-name" -t "prompt" --max-turns N
+     * For resuming:     goose run -n "session-name" -r -t "prompt" --max-turns N
+     * </p>
+     * <p>
+     * Note: We use "goose run" instead of "goose session" because:
+     * - "goose session" starts an interactive REPL that waits for user input
+     * - "goose run" executes a task non-interactively and exits when complete
      * </p>
      */
     private List<String> buildSessionCommand(String sessionName, String prompt, boolean resume, GooseOptions options) {
         List<String> command = new ArrayList<>();
         command.add(goosePath);
-        command.add("session");
+        command.add("run");
         
         // Add session name
-        command.add("--name");
+        command.add("-n");
         command.add(sessionName);
         
         // Add resume flag if continuing an existing session
         if (resume) {
-            command.add("--resume");
+            command.add("-r");
         }
         
-        // Add the prompt
-        command.add("--text");
+        // Add the prompt using -t flag
+        command.add("-t");
         command.add(prompt);
 
         // Add max-turns to prevent runaway sessions
