@@ -587,8 +587,10 @@ public class GooseExecutorImpl implements GooseExecutor {
 
     /**
      * Filter out Goose CLI banner/startup lines from output.
-     * This method removes banner lines wherever they appear in the output,
-     * as they can occur at the start of each session interaction.
+     * The banner appears at the start of each command invocation and includes:
+     * - "starting session | ..." or "resuming session | ..."
+     * - "session id: ..."
+     * - "working directory: ..."
      */
     private String filterGooseBanner(String output) {
         if (output == null || output.isEmpty()) {
@@ -597,33 +599,25 @@ public class GooseExecutorImpl implements GooseExecutor {
         
         StringBuilder filtered = new StringBuilder();
         String[] lines = output.split("\n");
-        boolean lastWasBanner = false;
+        boolean inBanner = true;
         
         for (String line : lines) {
-            // Skip all banner lines regardless of position
-            if (isGooseBannerLine(line)) {
-                lastWasBanner = true;
-                continue;
+            if (inBanner) {
+                // Skip banner lines and empty lines at the start
+                if (isGooseBannerLine(line) || line.trim().isEmpty()) {
+                    continue;
+                }
+                // First non-banner, non-empty line - we're past the banner
+                inBanner = false;
             }
             
-            // Skip empty lines immediately following banner lines
-            if (lastWasBanner && line.trim().isEmpty()) {
-                continue;
-            }
-            
-            lastWasBanner = false;
             filtered.append(line).append("\n");
         }
         
-        // Trim trailing newlines
+        // Trim trailing newline
         String result = filtered.toString();
-        while (result.endsWith("\n\n")) {
+        if (result.endsWith("\n")) {
             result = result.substring(0, result.length() - 1);
-        }
-        
-        // Trim leading newlines
-        while (result.startsWith("\n")) {
-            result = result.substring(1);
         }
         
         return result;
