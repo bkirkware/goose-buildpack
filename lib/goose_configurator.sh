@@ -1060,10 +1060,26 @@ for skill in skills:
     
     elif path:
         # File-based skill - copy from app directory
-        source_path = os.path.join(build_dir, path)
+        # Check multiple locations to support Spring Boot exploded JARs
+        source_path = None
+        actual_path = path
+        
+        # Try paths in order of priority:
+        # 1. Direct path (for non-Spring Boot apps or pre-exploded)
+        # 2. BOOT-INF/classes/ path (for Spring Boot exploded JARs)
+        candidate_paths = [
+            os.path.join(build_dir, path),
+            os.path.join(build_dir, 'BOOT-INF', 'classes', path),
+        ]
+        
+        for candidate in candidate_paths:
+            if os.path.exists(candidate):
+                source_path = candidate
+                break
+        
         target_path = os.path.join(project_skills_dir, name)
         
-        if os.path.exists(source_path):
+        if source_path:
             os.makedirs(target_path, exist_ok=True)
             import shutil
             if os.path.isdir(source_path):
@@ -1074,9 +1090,14 @@ for skill in skills:
                         shutil.copytree(s, d, dirs_exist_ok=True)
                     else:
                         shutil.copy2(s, d)
-            print(f"       Installed local skill: {name} from {path}")
+            # Show the actual location found for debugging
+            if 'BOOT-INF' in source_path:
+                print(f"       Installed local skill: {name} from {path} (found in BOOT-INF/classes/)")
+            else:
+                print(f"       Installed local skill: {name} from {path}")
         else:
             print(f"       WARNING: Skill path not found: {path}", file=sys.stderr)
+            print(f"       Checked: {path}, BOOT-INF/classes/{path}", file=sys.stderr)
 
 print(f"       Skills configuration complete")
 PYTHON_SCRIPT
