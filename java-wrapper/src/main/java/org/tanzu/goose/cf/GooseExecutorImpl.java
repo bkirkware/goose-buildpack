@@ -539,6 +539,10 @@ public class GooseExecutorImpl implements GooseExecutor {
             command.add(model);
         }
         
+        // Add configured extensions from goose-extensions.json
+        // The buildpack generates this file during staging with MCP server URLs
+        addExtensionsFromConfig(command);
+        
         // Add the prompt using -t flag
         command.add("-t");
         command.add(prompt);
@@ -548,6 +552,121 @@ public class GooseExecutorImpl implements GooseExecutor {
         command.add(String.valueOf(options.maxTurns()));
 
         return command;
+    }
+    
+    /**
+     * Read extensions from goose-extensions.json and add them to the command.
+     * <p>
+     * The buildpack generates ~/.config/goose/goose-extensions.json with configured
+     * MCP servers. This method reads that file and adds the appropriate
+     * --with-streamable-http-extension flags for remote extensions.
+     * </p>
+     * <p>
+     * File format:
+     * <pre>
+     * {
+     *   "extensions": [
+     *     {"id": "cloud-foundry", "name": "cloud-foundry", "type": "streamable_http", "url": "https://..."}
+     *   ]
+     * }
+     * </pre>
+     * </p>
+     */
+    private void addExtensionsFromConfig(List<String> command) {
+        // Look for goose-extensions.json in standard locations
+        String home = System.getenv("HOME");
+        if (home == null) {
+            home = System.getProperty("user.home");
+        }
+        
+        Path extensionsFile = Paths.get(home, ".config", "goose", "goose-extensions.json");
+        
+        if (!Files.exists(extensionsFile)) {
+            logger.debug("No goose-extensions.json found at {}", extensionsFile);
+            return;
+        }
+        
+        try {
+            String content = Files.readString(extensionsFile);
+            logger.debug("Found goose-extensions.json: {}", content);
+            
+            // Simple JSON parsing without external dependencies
+            // Format: {"extensions": [{"type": "streamable_http", "url": "..."}]}
+            List<String> urls = parseExtensionUrls(content);
+            
+            for (String url : urls) {
+                command.add("--with-streamable-http-extension");
+                command.add(url);
+                logger.info("Adding extension from config: {}", url);
+            }
+            
+            if (!urls.isEmpty()) {
+                logger.info("Added {} extension(s) from goose-extensions.json", urls.size());
+            }
+            
+        } catch (IOException e) {
+            logger.warn("Failed to read goose-extensions.json: {}", e.getMessage());
+        }
+    }
+    
+    /**
+     * Parse extension URLs from the goose-extensions.json content.
+     * <p>
+     * This is a simple parser that extracts URLs from streamable_http extensions
+     * without requiring a full JSON library dependency.
+     * </p>
+     */
+    private List<String> parseExtensionUrls(String jsonContent) {
+        List<String> urls = new ArrayList<>();
+        
+        // Simple regex-based extraction for "type": "streamable_http" and "url": "..."
+        // Look for patterns like: "type": "streamable_http", "url": "https://..."
+        // or "url": "https://...", "type": "streamable_http"
+        
+        // Split into extension blocks (between { and })
+        int pos = 0;
+        while (pos < jsonContent.length()) {
+            int blockStart = jsonContent.indexOf("{", pos);
+            if (blockStart == -1) break;
+            
+            int blockEnd = jsonContent.indexOf("}", blockStart);
+            if (blockEnd == -1) break;
+            
+            String block = jsonContent.substring(blockStart, blockEnd + 1);
+            
+            // Check if this block is a streamable_http extension
+            if (block.contains("\"streamable_http\"") || block.contains("\"http\"")) {
+                // Extract the URL
+                String url = extractJsonString(block, "url");
+                if (url != null && !url.isEmpty()) {
+                    urls.add(url);
+                }
+            }
+            
+            pos = blockEnd + 1;
+        }
+        
+        return urls;
+    }
+    
+    /**
+     * Extract a string value from a JSON-like string.
+     * Looks for "key": "value" pattern and returns the value.
+     */
+    private String extractJsonString(String json, String key) {
+        int keyIndex = json.indexOf("\"" + key + "\"");
+        if (keyIndex == -1) return null;
+        
+        int colonIndex = json.indexOf(":", keyIndex);
+        if (colonIndex == -1) return null;
+        
+        int valueStart = json.indexOf("\"", colonIndex + 1);
+        if (valueStart == -1) return null;
+        
+        int valueEnd = json.indexOf("\"", valueStart + 1);
+        if (valueEnd == -1) return null;
+        
+        return json.substring(valueStart + 1, valueEnd);
     }
 
     /**

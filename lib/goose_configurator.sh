@@ -228,10 +228,28 @@ with open(output_file, 'w') as f:
     f.write("# See: https://block.github.io/goose/docs/getting-started/using-extensions/\n\n")
     f.write("extensions:\n")
     
-    if not mcp_servers:
-        f.write("  # No MCP servers configured\n")
+    # Filter out SSE servers first and count valid extensions
+    valid_extensions = []
+    skipped_sse = []
+    
+    for server in mcp_servers:
+        name = server.get('name', 'unknown')
+        server_type = server.get('type', 'stdio').lower()
+        
+        if server_type == 'sse':
+            # SSE is not supported by Goose CLI - skip this server
+            print(f"       WARNING: Skipping MCP server '{name}' - SSE transport is not supported by Goose CLI.", file=sys.stderr)
+            print(f"       Please update the server to use Streaming HTTP transport (type: streamable_http).", file=sys.stderr)
+            skipped_sse.append(name)
+        else:
+            valid_extensions.append(server)
+    
+    if not valid_extensions:
+        f.write("  # No supported MCP servers configured\n")
+        if skipped_sse:
+            f.write(f"  # Skipped {len(skipped_sse)} SSE server(s): {', '.join(skipped_sse)}\n")
     else:
-        for server in mcp_servers:
+        for server in valid_extensions:
             name = server.get('name', 'unknown')
             server_type = server.get('type', 'stdio').lower()
             url = server.get('url', '')
@@ -246,14 +264,9 @@ with open(output_file, 'w') as f:
             
             # Handle different transport types
             # Note: Goose CLI has deprecated SSE support - only streamable_http is supported
-            # for remote extensions. SSE servers are skipped with a warning.
+            # for remote extensions.
             # See: https://block.github.io/goose/docs/getting-started/using-extensions/
-            if server_type == 'sse':
-                # SSE is not supported by Goose CLI - skip this server
-                print(f"       WARNING: Skipping MCP server '{name}' - SSE transport is not supported by Goose CLI.", file=sys.stderr)
-                print(f"       Please update the server to use Streaming HTTP transport (type: streamable_http).", file=sys.stderr)
-                continue
-            elif server_type == 'http' or server_type == 'streamable_http':
+            if server_type == 'http' or server_type == 'streamable_http':
                 # Remote Extension (Streaming HTTP) - the only supported remote transport
                 f.write(f"    type: streamable_http\n")
                 f.write(f"    url: \"{url}\"\n")
@@ -267,7 +280,39 @@ with open(output_file, 'w') as f:
             
             f.write("\n")
 
-print(f"Generated config.yaml with {len(mcp_servers)} extension(s)", file=sys.stderr)
+print(f"Generated config.yaml with {len(valid_extensions)} extension(s)", file=sys.stderr)
+if skipped_sse:
+    print(f"       Skipped {len(skipped_sse)} unsupported SSE server(s)", file=sys.stderr)
+
+# Also generate goose-extensions.json for Java wrapper consumption
+# This file is read by GooseExecutorImpl to pass --with-streamable-http-extension flags
+import json
+extensions_json_path = os.path.dirname(output_file) + "/goose-extensions.json"
+extensions_data = {
+    "extensions": []
+}
+for server in valid_extensions:
+    name = server.get('name', 'unknown')
+    server_type = server.get('type', 'stdio').lower()
+    url = server.get('url', '')
+    ext_id = re.sub(r'[^a-z0-9-]', '', name.lower().replace(' ', '-'))
+    
+    ext_entry = {
+        "id": ext_id,
+        "name": name,
+        "type": "streamable_http" if server_type in ['http', 'streamable_http'] else "stdio"
+    }
+    if url:
+        ext_entry["url"] = url
+    if server.get('command'):
+        ext_entry["command"] = server.get('command')
+    
+    extensions_data["extensions"].append(ext_entry)
+
+with open(extensions_json_path, 'w') as ef:
+    json.dump(extensions_data, ef, indent=2)
+
+print(f"       Created goose-extensions.json for Java wrapper", file=sys.stderr)
 PYTHON_SCRIPT
 
         if [ $? -eq 0 ]; then
