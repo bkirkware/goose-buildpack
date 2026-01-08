@@ -582,7 +582,8 @@ public class GooseExecutorImpl implements GooseExecutor {
 
     /**
      * Filter out Goose CLI banner/startup lines from output.
-     * This method removes banner lines to provide cleaner output.
+     * This method removes banner lines wherever they appear in the output,
+     * as they can occur at the start of each session interaction.
      */
     private String filterGooseBanner(String output) {
         if (output == null || output.isEmpty()) {
@@ -591,18 +592,21 @@ public class GooseExecutorImpl implements GooseExecutor {
         
         StringBuilder filtered = new StringBuilder();
         String[] lines = output.split("\n");
-        boolean inBanner = true;
+        boolean lastWasBanner = false;
         
         for (String line : lines) {
-            // Skip banner lines at the start
-            if (inBanner) {
-                if (isGooseBannerLine(line) || line.trim().isEmpty()) {
-                    continue;
-                }
-                // First non-banner line found
-                inBanner = false;
+            // Skip all banner lines regardless of position
+            if (isGooseBannerLine(line)) {
+                lastWasBanner = true;
+                continue;
             }
             
+            // Skip empty lines immediately following banner lines
+            if (lastWasBanner && line.trim().isEmpty()) {
+                continue;
+            }
+            
+            lastWasBanner = false;
             filtered.append(line).append("\n");
         }
         
@@ -610,6 +614,11 @@ public class GooseExecutorImpl implements GooseExecutor {
         String result = filtered.toString();
         while (result.endsWith("\n\n")) {
             result = result.substring(0, result.length() - 1);
+        }
+        
+        // Trim leading newlines
+        while (result.startsWith("\n")) {
+            result = result.substring(1);
         }
         
         return result;
