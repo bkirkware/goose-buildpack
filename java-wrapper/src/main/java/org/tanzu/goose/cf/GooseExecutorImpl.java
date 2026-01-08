@@ -568,6 +568,10 @@ public class GooseExecutorImpl implements GooseExecutor {
      *    session id: 20260108_1
      *    working directory: /home/vcap/app
      * </pre>
+     * Or for resumed sessions:
+     * <pre>
+     * resuming session | provider: openai model: gpt-4o
+     * </pre>
      * </p>
      */
     private boolean isGooseBannerLine(String line) {
@@ -576,6 +580,7 @@ public class GooseExecutorImpl implements GooseExecutor {
         }
         String trimmed = line.trim();
         return trimmed.startsWith("starting session |") ||
+               trimmed.startsWith("resuming session |") ||
                trimmed.startsWith("session id:") ||
                trimmed.startsWith("working directory:");
     }
