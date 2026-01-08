@@ -142,9 +142,9 @@ generate_goose_config_yaml() {
         return 1
     fi
 
-    # Check if file has mcpServers section
-    if ! grep -qE "(mcpServers|mcp-servers):" "${source_config}"; then
-        echo "       No MCP server configuration found in ${source_config}"
+    # Check if file has mcpServers or extensions section
+    if ! grep -qE "(mcpServers|mcp-servers|extensions):" "${source_config}"; then
+        echo "       No MCP server or extension configuration found in ${source_config}"
         return 1
     fi
 
@@ -172,12 +172,54 @@ mcp_servers = []
 in_mcp = False
 current_server = None
 
+# Parse builtin extensions from source config
+builtin_extensions = []
+in_extensions = False
+current_extension = None
+extensions_indent = 0
+
 for line in lines:
     stripped = line.strip()
+    current_indent = len(line) - len(line.lstrip())
+
+    # Detect start of extensions section (builtin extensions like developer, memory, etc.)
+    if re.match(r'^extensions:', stripped):
+        in_extensions = True
+        extensions_indent = current_indent
+        continue
+
+    # Process extensions section
+    if in_extensions:
+        # Detect end of extensions section (new top-level key)
+        if current_indent <= extensions_indent and stripped and not stripped.startswith('#') and re.match(r'^[a-zA-Z]', stripped):
+            in_extensions = False
+            if current_extension and current_extension.get('name'):
+                builtin_extensions.append(current_extension)
+                current_extension = None
+        else:
+            # Parse extension name (key under extensions:)
+            ext_match = re.match(r'^(\w+):', stripped)
+            if ext_match and current_indent > extensions_indent:
+                # Save previous extension
+                if current_extension and current_extension.get('name'):
+                    builtin_extensions.append(current_extension)
+                current_extension = {'name': ext_match.group(1)}
+            elif current_extension is not None:
+                # Parse extension properties
+                if re.match(r'enabled:', stripped):
+                    match = re.search(r'enabled:\s*(.+)', stripped)
+                    if match:
+                        current_extension['enabled'] = match.group(1).strip().lower() == 'true'
 
     # Detect start of mcpServers or mcp-servers section
     if re.match(r'(mcpServers|mcp-servers):', stripped):
         in_mcp = True
+        # End extensions section if we were in it
+        if in_extensions:
+            in_extensions = False
+            if current_extension and current_extension.get('name'):
+                builtin_extensions.append(current_extension)
+                current_extension = None
         continue
 
     # Detect start of new server (with or without inline name)
@@ -220,6 +262,10 @@ for line in lines:
 if current_server and current_server.get('name'):
     mcp_servers.append(current_server)
 
+# Add last extension
+if current_extension and current_extension.get('name'):
+    builtin_extensions.append(current_extension)
+
 # Generate Goose config.yaml with extensions
 # Format: https://block.github.io/goose/docs/getting-started/using-extensions/
 with open(output_file, 'w') as f:
@@ -228,8 +274,26 @@ with open(output_file, 'w') as f:
     f.write("# See: https://block.github.io/goose/docs/getting-started/using-extensions/\n\n")
     f.write("extensions:\n")
     
-    # Filter out SSE servers first and count valid extensions
-    valid_extensions = []
+    total_extensions = 0
+    
+    # First, add builtin extensions (like developer, memory, etc.)
+    enabled_builtins = [ext for ext in builtin_extensions if ext.get('enabled', True)]
+    for ext in enabled_builtins:
+        name = ext.get('name', 'unknown')
+        ext_id = re.sub(r'[^a-z0-9-]', '', name.lower().replace(' ', '-'))
+        
+        f.write(f"  {ext_id}:\n")
+        f.write(f"    type: builtin\n")
+        f.write(f"    name: {name}\n")
+        f.write(f"    enabled: true\n")
+        f.write(f"    timeout: 300\n")
+        f.write("\n")
+        
+        print(f"       Enabled builtin extension: {name}", file=sys.stderr)
+        total_extensions += 1
+    
+    # Filter out SSE servers and count valid MCP extensions
+    valid_mcp_extensions = []
     skipped_sse = []
     
     for server in mcp_servers:
@@ -242,14 +306,14 @@ with open(output_file, 'w') as f:
             print(f"       Please update the server to use Streaming HTTP transport (type: streamable_http).", file=sys.stderr)
             skipped_sse.append(name)
         else:
-            valid_extensions.append(server)
+            valid_mcp_extensions.append(server)
     
-    if not valid_extensions:
-        f.write("  # No supported MCP servers configured\n")
+    if not valid_mcp_extensions and not enabled_builtins:
+        f.write("  # No supported extensions configured\n")
         if skipped_sse:
             f.write(f"  # Skipped {len(skipped_sse)} SSE server(s): {', '.join(skipped_sse)}\n")
     else:
-        for server in valid_extensions:
+        for server in valid_mcp_extensions:
             name = server.get('name', 'unknown')
             server_type = server.get('type', 'stdio').lower()
             url = server.get('url', '')
@@ -281,8 +345,9 @@ with open(output_file, 'w') as f:
                     f.write(f"    args: []\n")
             
             f.write("\n")
+            total_extensions += 1
 
-print(f"Generated config.yaml with {len(valid_extensions)} extension(s)", file=sys.stderr)
+print(f"Generated config.yaml with {total_extensions} extension(s)", file=sys.stderr)
 if skipped_sse:
     print(f"       Skipped {len(skipped_sse)} unsupported SSE server(s)", file=sys.stderr)
 
