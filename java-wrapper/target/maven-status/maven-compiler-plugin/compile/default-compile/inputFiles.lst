@@ -1,7 +1,0 @@
-/Users/corby/Projects/goose/goose-buildpack/java-wrapper/src/main/java/org/tanzu/goose/cf/spring/GooseProperties.java
-/Users/corby/Projects/goose/goose-buildpack/java-wrapper/src/main/java/org/tanzu/goose/cf/spring/GooseController.java
-/Users/corby/Projects/goose/goose-buildpack/java-wrapper/src/main/java/org/tanzu/goose/cf/GooseExecutionException.java
-/Users/corby/Projects/goose/goose-buildpack/java-wrapper/src/main/java/org/tanzu/goose/cf/GooseExecutor.java
-/Users/corby/Projects/goose/goose-buildpack/java-wrapper/src/main/java/org/tanzu/goose/cf/GooseOptions.java
-/Users/corby/Projects/goose/goose-buildpack/java-wrapper/src/main/java/org/tanzu/goose/cf/spring/GooseAutoConfiguration.java
-/Users/corby/Projects/goose/goose-buildpack/java-wrapper/src/main/java/org/tanzu/goose/cf/GooseExecutorImpl.java

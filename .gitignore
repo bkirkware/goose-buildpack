@@ -1,0 +1,20 @@
+# Maven build output
+java-wrapper/target/
+
+# IDE files
+*.iml
+.idea/
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
