@@ -218,13 +218,31 @@ Customize session execution with `GooseOptions`:
 GooseOptions options = GooseOptions.builder()
     .timeout(Duration.ofMinutes(10))      // Execution timeout
     .maxTurns(50)                          // Max conversation turns
-    .provider("anthropic")                 // LLM provider
-    .model("claude-sonnet-4-20250514")               // Model to use
+    .provider("anthropic")                 // LLM provider (optional)
+    .model("claude-sonnet-4-20250514")     // Model to use (optional)
     .addEnv("CUSTOM_VAR", "value")         // Additional env vars
     .build();
 
 executor.executeInSession("session-name", "prompt", true, options);
 ```
+
+### Provider and Model Resolution
+
+The wrapper automatically resolves provider and model in this order:
+
+1. **GooseOptions** - If `provider()` or `model()` is set in options, use that
+2. **Environment Variables** - Fall back to `GOOSE_PROVIDER` and `GOOSE_MODEL` env vars
+3. **Goose Config File** - The buildpack parses `.goose-config.yml` and exports these env vars
+
+This means applications don't need to explicitly set provider/model if they're configured in `.goose-config.yml`:
+
+```yaml
+# .goose-config.yml (in src/main/resources/)
+provider: openai
+model: gpt-4o
+```
+
+The buildpack will parse this and set `GOOSE_PROVIDER=openai` and `GOOSE_MODEL=gpt-4o`, which the wrapper reads automatically.
 
 ## Best Practices
 
