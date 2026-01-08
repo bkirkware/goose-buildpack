@@ -518,6 +518,18 @@ public class GooseExecutorImpl implements GooseExecutor {
             command.add("-r");
         }
         
+        // Add provider if specified
+        if (options.provider() != null && !options.provider().isEmpty()) {
+            command.add("--provider");
+            command.add(options.provider());
+        }
+        
+        // Add model if specified
+        if (options.model() != null && !options.model().isEmpty()) {
+            command.add("--model");
+            command.add(options.model());
+        }
+        
         // Add the prompt using -t flag
         command.add("-t");
         command.add(prompt);
