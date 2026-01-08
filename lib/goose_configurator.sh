@@ -319,6 +319,22 @@ configure_goose() {
     # Parse configuration file (optional - continue even if not found)
     parse_goose_config "${build_dir}" || echo "       No .goose-config.yml found, using defaults"
 
+    # Write parsed provider/model to profile.d script so they're available at runtime
+    local profile_script="${build_dir}/.profile.d/goose-env.sh"
+    if [ -f "${profile_script}" ]; then
+        # Append provider/model configuration if parsed from config file
+        if [ -n "${GOOSE_PROVIDER}" ]; then
+            echo "" >> "${profile_script}"
+            echo "# Provider/model from .goose-config.yml" >> "${profile_script}"
+            echo "export GOOSE_PROVIDER=\"${GOOSE_PROVIDER}\"" >> "${profile_script}"
+            echo "       Added GOOSE_PROVIDER=${GOOSE_PROVIDER} to runtime environment"
+        fi
+        if [ -n "${GOOSE_MODEL}" ]; then
+            echo "export GOOSE_MODEL=\"${GOOSE_MODEL}\"" >> "${profile_script}"
+            echo "       Added GOOSE_MODEL=${GOOSE_MODEL} to runtime environment"
+        fi
+    fi
+
     # Generate profiles.yaml
     generate_profiles_yaml "${build_dir}"
 
