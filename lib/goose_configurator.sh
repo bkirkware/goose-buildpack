@@ -245,12 +245,16 @@ with open(output_file, 'w') as f:
             f.write(f"    timeout: 300\n")
             
             # Handle different transport types
+            # Note: Goose CLI has deprecated SSE support - only streamable_http is supported
+            # for remote extensions. SSE servers are skipped with a warning.
+            # See: https://block.github.io/goose/docs/getting-started/using-extensions/
             if server_type == 'sse':
-                # Remote Extension (SSE)
-                f.write(f"    type: sse\n")
-                f.write(f"    url: \"{url}\"\n")
+                # SSE is not supported by Goose CLI - skip this server
+                print(f"       WARNING: Skipping MCP server '{name}' - SSE transport is not supported by Goose CLI.", file=sys.stderr)
+                print(f"       Please update the server to use Streaming HTTP transport (type: streamable_http).", file=sys.stderr)
+                continue
             elif server_type == 'http' or server_type == 'streamable_http':
-                # Remote Extension (Streaming HTTP)
+                # Remote Extension (Streaming HTTP) - the only supported remote transport
                 f.write(f"    type: streamable_http\n")
                 f.write(f"    url: \"{url}\"\n")
             else:
