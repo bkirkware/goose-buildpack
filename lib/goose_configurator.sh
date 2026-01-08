@@ -259,6 +259,7 @@ with open(output_file, 'w') as f:
             
             f.write(f"  {ext_id}:\n")
             f.write(f"    name: {name}\n")
+            f.write(f"    description: MCP extension {name}\n")
             f.write(f"    enabled: true\n")
             f.write(f"    timeout: 300\n")
             
@@ -268,8 +269,9 @@ with open(output_file, 'w') as f:
             # See: https://block.github.io/goose/docs/getting-started/using-extensions/
             if server_type == 'http' or server_type == 'streamable_http':
                 # Remote Extension (Streaming HTTP) - the only supported remote transport
+                # Note: Goose expects 'uri' field, not 'url'!
                 f.write(f"    type: streamable_http\n")
-                f.write(f"    url: \"{url}\"\n")
+                f.write(f"    uri: \"{url}\"\n")
             else:
                 # Local stdio extension (default)
                 cmd = server.get('command', '')
