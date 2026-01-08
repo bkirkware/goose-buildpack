@@ -29,6 +29,24 @@ export GOOSE_CONFIG_HOME="\$HOME"
 export GOOSE_CONFIG_DIR="\${HOME}/.config/goose"
 mkdir -p "\$GOOSE_CONFIG_DIR"
 
+# Copy Goose configuration from app directory to HOME (where Goose expects it)
+# The buildpack generates config.yaml and profiles.yaml in /home/vcap/app/.config/goose/
+# but Goose looks for them in ~/.config/goose/
+if [ -d "/home/vcap/app/.config/goose" ]; then
+    echo "[goose-env] Copying Goose configuration to \$HOME/.config/goose/"
+    cp -r /home/vcap/app/.config/goose/* "\$GOOSE_CONFIG_DIR/" 2>/dev/null || true
+    
+    # Debug: Show what config files are available
+    echo "[goose-env] Configuration files in \$GOOSE_CONFIG_DIR:"
+    ls -la "\$GOOSE_CONFIG_DIR/" 2>/dev/null || echo "[goose-env] (none found)"
+    
+    # Debug: Show config.yaml contents if it exists
+    if [ -f "\$GOOSE_CONFIG_DIR/config.yaml" ]; then
+        echo "[goose-env] config.yaml contents:"
+        cat "\$GOOSE_CONFIG_DIR/config.yaml"
+    fi
+fi
+
 # Provider configuration
 # Supported providers: openai, anthropic, google, databricks, ollama, etc.
 # These are set from config file or environment variables

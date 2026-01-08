@@ -75,6 +75,74 @@ public class GooseExecutorImpl implements GooseExecutor {
     public GooseExecutorImpl() {
         this.goosePath = getRequiredEnv("GOOSE_CLI_PATH");
         this.baseEnvironment = buildBaseEnvironment();
+        
+        // Log Goose configuration status at startup
+        logGooseConfiguration();
+    }
+    
+    /**
+     * Log Goose configuration status for troubleshooting.
+     * This helps diagnose issues with config.yaml loading.
+     */
+    private void logGooseConfiguration() {
+        String home = System.getenv("HOME");
+        logger.info("Goose configuration check:");
+        logger.info("  HOME = {}", home);
+        logger.info("  GOOSE_CLI_PATH = {}", goosePath);
+        logger.info("  GOOSE_PROVIDER = {}", System.getenv("GOOSE_PROVIDER"));
+        logger.info("  GOOSE_MODEL = {}", System.getenv("GOOSE_MODEL"));
+        logger.info("  GOOSE_CONFIG_DIR = {}", System.getenv("GOOSE_CONFIG_DIR"));
+        
+        if (home != null) {
+            Path configDir = Paths.get(home, ".config", "goose");
+            Path configFile = configDir.resolve("config.yaml");
+            Path profilesFile = configDir.resolve("profiles.yaml");
+            
+            logger.info("  Config directory: {}", configDir);
+            logger.info("    Exists: {}", Files.exists(configDir));
+            
+            if (Files.exists(configDir)) {
+                try {
+                    Files.list(configDir).forEach(path -> 
+                        logger.info("    File: {}", path.getFileName()));
+                } catch (IOException e) {
+                    logger.warn("    Error listing config directory: {}", e.getMessage());
+                }
+            }
+            
+            if (Files.exists(configFile)) {
+                logger.info("  config.yaml found at: {}", configFile);
+                try {
+                    List<String> lines = Files.readAllLines(configFile);
+                    logger.info("  config.yaml contents ({} lines):", lines.size());
+                    for (String line : lines) {
+                        logger.info("    {}", line);
+                    }
+                } catch (IOException e) {
+                    logger.warn("    Error reading config.yaml: {}", e.getMessage());
+                }
+            } else {
+                logger.warn("  config.yaml NOT FOUND at: {}", configFile);
+                
+                // Check alternative locations
+                Path appConfigDir = Paths.get("/home/vcap/app/.config/goose");
+                if (Files.exists(appConfigDir)) {
+                    logger.info("  Found config at /home/vcap/app/.config/goose/ (needs to be copied to HOME)");
+                    try {
+                        Files.list(appConfigDir).forEach(path -> 
+                            logger.info("    File: {}", path.getFileName()));
+                    } catch (IOException e) {
+                        logger.warn("    Error listing app config directory: {}", e.getMessage());
+                    }
+                }
+            }
+            
+            if (Files.exists(profilesFile)) {
+                logger.info("  profiles.yaml found at: {}", profilesFile);
+            } else {
+                logger.warn("  profiles.yaml NOT FOUND at: {}", profilesFile);
+            }
+        }
     }
 
     /**
