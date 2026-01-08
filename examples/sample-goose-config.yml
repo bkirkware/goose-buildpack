@@ -46,8 +46,8 @@ goose:
   #
   # Remote SSE MCP servers:
   #   - name: custom-server
-  #     type: sse
-  #     url: "https://mcp-server.example.com/sse"
+  #     type: streamable_http
+  #     url: "https://mcp-server.example.com/mcp"
 
   # Extension configuration
   # extensions:

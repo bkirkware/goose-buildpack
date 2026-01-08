@@ -496,7 +496,7 @@ public class GooseExecutorImpl implements GooseExecutor {
     /**
      * Build the command line arguments for a named Goose session.
      * <p>
-     * For new sessions: goose run -n "session-name" --with-streamable-http-extension URL -t "prompt" --max-turns N
+     * For new sessions: goose run -n "session-name" --provider X --model Y --with-streamable-http-extension URL -t "prompt" --max-turns N
      * For resuming:     goose run -n "session-name" -r -t "prompt" --max-turns N
      * </p>
      * <p>
@@ -505,12 +505,16 @@ public class GooseExecutorImpl implements GooseExecutor {
      * - "goose run" executes a task non-interactively and exits when complete
      * </p>
      * <p>
-     * IMPORTANT: Extensions are only passed on new sessions, not on resumed sessions.
-     * When resuming, Goose uses the extensions that were configured when the session started.
-     * Passing new extension flags on resume causes "Resume cancelled" errors.
+     * IMPORTANT: Provider, model, and extension flags are ONLY passed on new sessions.
+     * Goose stores the session configuration when first created and expects resumed sessions
+     * to use that same configuration. Passing ANY configuration flags on resume (even the same
+     * values) may trigger "Resume cancelled" due to configuration mismatch detection.
      * </p>
      */
     private List<String> buildSessionCommand(String sessionName, String prompt, boolean resume, GooseOptions options) {
+        logger.info("Building session command: session='{}', resume={}, promptLength={}", 
+            sessionName, resume, prompt.length());
+        
         List<String> command = new ArrayList<>();
         command.add(goosePath);
         command.add("run");
@@ -522,16 +526,26 @@ public class GooseExecutorImpl implements GooseExecutor {
         // Add resume flag if continuing an existing session
         if (resume) {
             command.add("-r");
+            logger.info("Session '{}': Adding resume flag (-r)", sessionName);
+        } else {
+            logger.info("Session '{}': New session (no resume flag)", sessionName);
         }
         
         // Resolve provider: options > GOOSE_PROVIDER env var
+        // Only pass provider/model on new sessions - resumed sessions should use their original config
+        // Passing different provider/model on resume may cause configuration mismatch
         String provider = options.provider();
         if (provider == null || provider.isEmpty()) {
             provider = System.getenv("GOOSE_PROVIDER");
         }
         if (provider != null && !provider.isEmpty()) {
-            command.add("--provider");
-            command.add(provider);
+            if (!resume) {
+                command.add("--provider");
+                command.add(provider);
+                logger.info("Session '{}': Setting provider '{}' (new session)", sessionName, provider);
+            } else {
+                logger.info("Session '{}': SKIPPING provider flag (resumed session uses original provider)", sessionName);
+            }
         }
         
         // Resolve model: options > GOOSE_MODEL env var
@@ -540,17 +554,25 @@ public class GooseExecutorImpl implements GooseExecutor {
             model = System.getenv("GOOSE_MODEL");
         }
         if (model != null && !model.isEmpty()) {
-            command.add("--model");
-            command.add(model);
+            if (!resume) {
+                command.add("--model");
+                command.add(model);
+                logger.info("Session '{}': Setting model '{}' (new session)", sessionName, model);
+            } else {
+                logger.info("Session '{}': SKIPPING model flag (resumed session uses original model)", sessionName);
+            }
         }
         
         // Add configured extensions from goose-extensions.json
-        // ONLY for new sessions - resumed sessions use their original extensions
-        // Passing extension flags on resume causes "Resume cancelled" error
+        // Only add extensions on NEW sessions - resumed sessions should use their original config
+        // Goose stores the session configuration (provider, model, extensions) when the session
+        // is first created. On resume, passing ANY different configuration (even the same values)
+        // may trigger "Resume cancelled" due to configuration mismatch detection.
         if (!resume) {
+            logger.info("Session '{}': Loading extensions (new session)", sessionName);
             addExtensionsFromConfig(command);
         } else {
-            logger.debug("Resuming session '{}' - skipping extension flags", sessionName);
+            logger.info("Session '{}': SKIPPING extensions (resumed session uses original config)", sessionName);
         }
         
         // Add the prompt using -t flag
@@ -560,6 +582,13 @@ public class GooseExecutorImpl implements GooseExecutor {
         // Add max-turns to prevent runaway sessions
         command.add("--max-turns");
         command.add(String.valueOf(options.maxTurns()));
+
+        // Log the full command (with prompt truncated for readability)
+        String promptPreview = prompt.length() > 50 ? prompt.substring(0, 50) + "..." : prompt;
+        logger.info("Session '{}': Full command: {} (prompt: '{}')", 
+            sessionName, 
+            String.join(" ", command.subList(0, command.size() - 3)), // Exclude -t, prompt, --max-turns, N
+            promptPreview);
 
         return command;
     }
@@ -588,34 +617,38 @@ public class GooseExecutorImpl implements GooseExecutor {
         if (home == null) {
             home = System.getProperty("user.home");
         }
+        logger.info("Looking for goose-extensions.json in HOME={}", home);
         
         Path extensionsFile = Paths.get(home, ".config", "goose", "goose-extensions.json");
+        logger.info("Extensions file path: {}", extensionsFile);
         
         if (!Files.exists(extensionsFile)) {
-            logger.debug("No goose-extensions.json found at {}", extensionsFile);
+            logger.warn("No goose-extensions.json found at {} - no extensions will be loaded", extensionsFile);
             return;
         }
         
         try {
             String content = Files.readString(extensionsFile);
-            logger.debug("Found goose-extensions.json: {}", content);
+            logger.info("Found goose-extensions.json, content length: {} chars", content.length());
+            logger.debug("goose-extensions.json content: {}", content);
             
             // Simple JSON parsing without external dependencies
             // Format: {"extensions": [{"type": "streamable_http", "url": "..."}]}
             List<String> urls = parseExtensionUrls(content);
+            logger.info("Parsed {} extension URL(s) from goose-extensions.json", urls.size());
             
             for (String url : urls) {
                 command.add("--with-streamable-http-extension");
                 command.add(url);
-                logger.info("Adding extension from config: {}", url);
+                logger.info("Adding extension flag: --with-streamable-http-extension {}", url);
             }
             
-            if (!urls.isEmpty()) {
-                logger.info("Added {} extension(s) from goose-extensions.json", urls.size());
+            if (urls.isEmpty()) {
+                logger.warn("goose-extensions.json exists but no streamable_http extensions were found");
             }
             
         } catch (IOException e) {
-            logger.warn("Failed to read goose-extensions.json: {}", e.getMessage());
+            logger.error("Failed to read goose-extensions.json: {}", e.getMessage(), e);
         }
     }
     
