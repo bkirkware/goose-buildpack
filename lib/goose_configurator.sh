@@ -69,162 +69,6 @@ parse_goose_config() {
     return 0
 }
 
-# Extract MCP servers from YAML configuration file
-# Generates Goose-compatible MCP configuration
-extract_mcp_servers() {
-    local config_file=$1
-    local output_file=$2
-
-    if [ ! -f "${config_file}" ]; then
-        echo "       No configuration file found: ${config_file}"
-        return 1
-    fi
-
-    # Check if file has mcpServers section
-    if ! grep -qE "(mcpServers|mcp-servers):" "${config_file}"; then
-        echo "       No MCP server configuration found in ${config_file}"
-        return 1
-    fi
-
-    # Use Python for YAML parsing (available in Cloud Foundry stacks)
-    if command -v python3 > /dev/null 2>&1; then
-        # Run Python parser - stdout goes to file, stderr goes to console
-        python3 - "${config_file}" > "${output_file}" <<'PYTHON_SCRIPT'
-import sys
-import re
-import json
-import os
-
-if len(sys.argv) < 2:
-    sys.exit(1)
-
-config_file = sys.argv[1]
-
-try:
-    with open(config_file, 'r') as f:
-        lines = f.readlines()
-except Exception as e:
-    # Return empty config
-    print(json.dumps({}))
-    sys.exit(0)
-
-mcp_servers = {}
-in_mcp = False
-current_server = None
-current_server_name = None
-in_args = False
-in_env = False
-
-for line in lines:
-    stripped = line.strip()
-
-    # Detect start of mcpServers or mcp-servers section
-    if re.match(r'(mcpServers|mcp-servers):', stripped):
-        in_mcp = True
-        continue
-
-    # Detect start of new server (with or without inline name)
-    if in_mcp and re.match(r'-\s+name:', stripped):
-        # Save previous server
-        if current_server and current_server_name:
-            mcp_servers[current_server_name] = current_server
-
-        # Start new server
-        match = re.search(r'name:\s*(.+)', stripped)
-        current_server_name = match.group(1).strip() if match else None
-        current_server = {}
-        in_args = False
-        in_env = False
-        continue
-
-    # Parse server properties (only when we have a current server)
-    if current_server is not None:
-        # Type (stdio, sse, http)
-        if re.match(r'^\s*type:', line):
-            match = re.search(r'type:\s*(.+)', stripped)
-            if match:
-                current_server['type'] = match.group(1).strip()
-
-        # URL (for remote servers: sse, http)
-        elif re.match(r'^\s*url:', line):
-            match = re.search(r'url:\s*(.+)', stripped)
-            if match:
-                url = match.group(1).strip().strip('"')
-                current_server['url'] = url
-
-        # Command (for local servers: stdio)
-        elif re.match(r'^\s*command:', line):
-            match = re.search(r'command:\s*(.+)', stripped)
-            if match:
-                current_server['command'] = match.group(1).strip()
-
-        # Args array
-        elif re.match(r'^\s*args:', line):
-            current_server['args'] = []
-            in_args = True
-            in_env = False
-
-        elif in_args:
-            if re.match(r'^\s+-\s+"', line):
-                match = re.search(r'-\s+"([^"]+)"', stripped)
-                if match:
-                    current_server['args'].append(match.group(1))
-            elif re.match(r'^\s+-\s+', line):
-                # Handle unquoted args
-                match = re.search(r'-\s+(.+)', stripped)
-                if match:
-                    arg_value = match.group(1).strip().strip('"').strip("'")
-                    current_server['args'].append(arg_value)
-            elif re.match(r'^\s*[a-zA-Z_]+:', line):
-                # Exit args section
-                in_args = False
-
-        # Env object
-        if re.match(r'^\s*env:', line) and not in_args:
-            current_server['env'] = {}
-            in_env = True
-            in_args = False
-
-        elif in_env and re.match(r'^\s+[A-Z_]+:', line):
-            match = re.search(r'([A-Z_]+):\s*(.+)', stripped)
-            if match:
-                key = match.group(1).strip()
-                value = match.group(2).strip().strip('"').strip("'")
-                # Handle environment variable substitution syntax ${VAR}
-                if value.startswith('${') and value.endswith('}'):
-                    env_var = value[2:-1]
-                    value = os.environ.get(env_var, '')
-                current_server['env'][key] = value
-
-    # Detect end of MCP section
-    if in_mcp and line and not line.startswith((' ', '\t', '-', '#')) and stripped:
-        in_mcp = False
-
-# Add last server
-if current_server and current_server_name:
-    mcp_servers[current_server_name] = current_server
-
-# Output JSON - Goose uses a different config format than Claude Code
-print(json.dumps(mcp_servers, indent=2))
-PYTHON_SCRIPT
-
-    else
-        # Fallback: create empty config if Python not available
-        echo "{}" > "${output_file}"
-        echo "       WARNING: Python3 not available for YAML parsing, using empty config"
-        return 1
-    fi
-
-    # Validate generated JSON
-    if [ -f "${output_file}" ]; then
-        echo "       Generated MCP server configuration"
-        return 0
-    fi
-
-    echo "       Failed to generate MCP configuration"
-    return 1
-}
-
 # Generate Goose profiles.yaml configuration file
 # Goose uses profiles.yaml in ~/.config/goose/ for provider/model settings
 generate_profiles_yaml() {
@@ -257,54 +101,214 @@ EOF
 }
 
 # Generate MCP server configuration for Goose
-# Creates mcp_servers.json in ~/.config/goose/
+# Creates config.yaml with extensions section in ~/.config/goose/
+# Goose uses config.yaml (not mcp_servers.json) for extension configuration
 generate_mcp_config() {
     local build_dir=$1
     local config_dir="${build_dir}/.config/goose"
-    local mcp_file="${config_dir}/mcp_servers.json"
+    local config_file="${config_dir}/config.yaml"
 
     # Create config directory
     mkdir -p "${config_dir}"
 
-    echo "-----> Configuring MCP servers"
+    echo "-----> Configuring MCP servers as Goose extensions"
 
-    # Check for config file
+    # Check for config file with MCP servers
     if [ -n "${GOOSE_CONFIG_FILE}" ] && [ -f "${GOOSE_CONFIG_FILE}" ]; then
-        if extract_mcp_servers "${GOOSE_CONFIG_FILE}" "${mcp_file}"; then
-            echo "       Created ${mcp_file} from configuration"
-
-            # Count servers
-            local server_count=$(grep -c '"type"' "${mcp_file}" 2>/dev/null || true)
-            if [ "${server_count}" -gt 0 ]; then
-                echo "       Configured ${server_count} MCP server(s)"
-            fi
+        if generate_goose_config_yaml "${GOOSE_CONFIG_FILE}" "${config_file}"; then
+            echo "       Created ${config_file} with extensions"
             return 0
         fi
     fi
 
-    # No MCP configuration found - create empty config
-    echo "{}" > "${mcp_file}"
-    echo "       Created empty MCP configuration (no servers configured)"
+    # No MCP configuration found - create minimal config
+    cat > "${config_file}" <<EOF
+# Goose configuration
+# Generated by goose-buildpack
+extensions: {}
+EOF
+    echo "       Created minimal Goose configuration (no extensions configured)"
     return 0
 }
 
-# Validate MCP server configuration
-validate_mcp_config() {
-    local build_dir=$1
-    local mcp_file="${build_dir}/.config/goose/mcp_servers.json"
+# Generate Goose config.yaml with extensions from .goose-config.yml
+# Goose CLI expects extensions in config.yaml format, not mcp_servers.json
+generate_goose_config_yaml() {
+    local source_config=$1
+    local output_file=$2
 
-    if [ ! -f "${mcp_file}" ]; then
-        echo "       WARNING: mcp_servers.json not found"
+    if [ ! -f "${source_config}" ]; then
+        echo "       No source configuration file found: ${source_config}"
         return 1
     fi
 
-    # Basic validation - check JSON structure
+    # Check if file has mcpServers section
+    if ! grep -qE "(mcpServers|mcp-servers):" "${source_config}"; then
+        echo "       No MCP server configuration found in ${source_config}"
+        return 1
+    fi
+
+    # Use Python for YAML parsing and config.yaml generation
     if command -v python3 > /dev/null 2>&1; then
-        if python3 -c "import json; json.load(open('${mcp_file}'))" 2>/dev/null; then
-            echo "       Validated mcp_servers.json"
+        python3 - "${source_config}" "${output_file}" <<'PYTHON_SCRIPT'
+import sys
+import re
+import os
+
+if len(sys.argv) < 3:
+    sys.exit(1)
+
+source_config = sys.argv[1]
+output_file = sys.argv[2]
+
+try:
+    with open(source_config, 'r') as f:
+        lines = f.readlines()
+except Exception as e:
+    sys.exit(1)
+
+# Parse MCP servers from source config
+mcp_servers = []
+in_mcp = False
+current_server = None
+
+for line in lines:
+    stripped = line.strip()
+
+    # Detect start of mcpServers or mcp-servers section
+    if re.match(r'(mcpServers|mcp-servers):', stripped):
+        in_mcp = True
+        continue
+
+    # Detect start of new server (with or without inline name)
+    if in_mcp and re.match(r'-\s+name:', stripped):
+        # Save previous server
+        if current_server and current_server.get('name'):
+            mcp_servers.append(current_server)
+
+        # Start new server
+        match = re.search(r'name:\s*(.+)', stripped)
+        current_server = {'name': match.group(1).strip() if match else None}
+        continue
+
+    # Parse server properties (only when we have a current server)
+    if current_server is not None:
+        # Type (stdio, sse, http)
+        if re.match(r'^\s*type:', line):
+            match = re.search(r'type:\s*(.+)', stripped)
+            if match:
+                current_server['type'] = match.group(1).strip()
+
+        # URL (for remote servers: sse, http)
+        elif re.match(r'^\s*url:', line):
+            match = re.search(r'url:\s*(.+)', stripped)
+            if match:
+                url = match.group(1).strip().strip('"')
+                current_server['url'] = url
+
+        # Command (for local servers: stdio)
+        elif re.match(r'^\s*command:', line):
+            match = re.search(r'command:\s*(.+)', stripped)
+            if match:
+                current_server['command'] = match.group(1).strip()
+
+    # Detect end of MCP section
+    if in_mcp and line and not line.startswith((' ', '\t', '-', '#')) and stripped:
+        in_mcp = False
+
+# Add last server
+if current_server and current_server.get('name'):
+    mcp_servers.append(current_server)
+
+# Generate Goose config.yaml with extensions
+# Format: https://block.github.io/goose/docs/getting-started/using-extensions/
+with open(output_file, 'w') as f:
+    f.write("# Goose configuration\n")
+    f.write("# Generated by goose-buildpack from .goose-config.yml\n")
+    f.write("# See: https://block.github.io/goose/docs/getting-started/using-extensions/\n\n")
+    f.write("extensions:\n")
+    
+    if not mcp_servers:
+        f.write("  # No MCP servers configured\n")
+    else:
+        for server in mcp_servers:
+            name = server.get('name', 'unknown')
+            server_type = server.get('type', 'stdio').lower()
+            url = server.get('url', '')
+            
+            # Generate extension ID from name (lowercase, replace spaces with hyphens)
+            ext_id = re.sub(r'[^a-z0-9-]', '', name.lower().replace(' ', '-'))
+            
+            f.write(f"  {ext_id}:\n")
+            f.write(f"    name: {name}\n")
+            f.write(f"    enabled: true\n")
+            f.write(f"    timeout: 300\n")
+            
+            # Handle different transport types
+            if server_type == 'sse':
+                # Remote Extension (SSE)
+                f.write(f"    type: sse\n")
+                f.write(f"    url: \"{url}\"\n")
+            elif server_type == 'http' or server_type == 'streamable_http':
+                # Remote Extension (Streaming HTTP)
+                f.write(f"    type: streamable_http\n")
+                f.write(f"    url: \"{url}\"\n")
+            else:
+                # Local stdio extension (default)
+                cmd = server.get('command', '')
+                f.write(f"    type: stdio\n")
+                if cmd:
+                    f.write(f"    cmd: {cmd}\n")
+                    f.write(f"    args: []\n")
+            
+            f.write("\n")
+
+print(f"Generated config.yaml with {len(mcp_servers)} extension(s)", file=sys.stderr)
+PYTHON_SCRIPT
+
+        if [ $? -eq 0 ]; then
+            # Count extensions
+            local ext_count=$(grep -c "^  [a-z]" "${output_file}" 2>/dev/null || echo "0")
+            echo "       Configured ${ext_count} MCP extension(s)"
+            return 0
+        fi
+    else
+        echo "       WARNING: Python3 not available for config generation"
+        return 1
+    fi
+
+    return 1
+}
+
+# Validate Goose config.yaml
+validate_mcp_config() {
+    local build_dir=$1
+    local config_file="${build_dir}/.config/goose/config.yaml"
+
+    if [ ! -f "${config_file}" ]; then
+        echo "       WARNING: config.yaml not found"
+        return 1
+    fi
+
+    # Basic validation - check YAML structure
+    if command -v python3 > /dev/null 2>&1; then
+        if python3 -c "
+import sys
+try:
+    with open('${config_file}', 'r') as f:
+        content = f.read()
+    # Basic YAML validation - check for extensions key
+    if 'extensions:' in content:
+        sys.exit(0)
+    else:
+        sys.exit(1)
+except Exception as e:
+    sys.exit(1)
+" 2>/dev/null; then
+            echo "       Validated config.yaml"
             return 0
         else
-            echo "       WARNING: Invalid JSON in mcp_servers.json"
+            echo "       WARNING: Invalid config.yaml"
             return 1
         fi
     fi
