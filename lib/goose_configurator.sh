@@ -284,35 +284,9 @@ print(f"Generated config.yaml with {len(valid_extensions)} extension(s)", file=s
 if skipped_sse:
     print(f"       Skipped {len(skipped_sse)} unsupported SSE server(s)", file=sys.stderr)
 
-# Also generate goose-extensions.json for Java wrapper consumption
-# This file is read by GooseExecutorImpl to pass --with-streamable-http-extension flags
-import json
-extensions_json_path = os.path.dirname(output_file) + "/goose-extensions.json"
-extensions_data = {
-    "extensions": []
-}
-for server in valid_extensions:
-    name = server.get('name', 'unknown')
-    server_type = server.get('type', 'stdio').lower()
-    url = server.get('url', '')
-    ext_id = re.sub(r'[^a-z0-9-]', '', name.lower().replace(' ', '-'))
-    
-    ext_entry = {
-        "id": ext_id,
-        "name": name,
-        "type": "streamable_http" if server_type in ['http', 'streamable_http'] else "stdio"
-    }
-    if url:
-        ext_entry["url"] = url
-    if server.get('command'):
-        ext_entry["command"] = server.get('command')
-    
-    extensions_data["extensions"].append(ext_entry)
-
-with open(extensions_json_path, 'w') as ef:
-    json.dump(extensions_data, ef, indent=2)
-
-print(f"       Created goose-extensions.json for Java wrapper", file=sys.stderr)
+# NOTE: We no longer generate goose-extensions.json for CLI flags.
+# Extensions in config.yaml are loaded automatically by Goose and work with session resume.
+# Passing --with-streamable-http-extension via CLI flags breaks session resume (Goose bug).
 PYTHON_SCRIPT
 
         if [ $? -eq 0 ]; then
