@@ -496,13 +496,18 @@ public class GooseExecutorImpl implements GooseExecutor {
     /**
      * Build the command line arguments for a named Goose session.
      * <p>
-     * For new sessions: goose run -n "session-name" -t "prompt" --max-turns N
+     * For new sessions: goose run -n "session-name" --with-streamable-http-extension URL -t "prompt" --max-turns N
      * For resuming:     goose run -n "session-name" -r -t "prompt" --max-turns N
      * </p>
      * <p>
      * Note: We use "goose run" instead of "goose session" because:
      * - "goose session" starts an interactive REPL that waits for user input
      * - "goose run" executes a task non-interactively and exits when complete
+     * </p>
+     * <p>
+     * IMPORTANT: Extensions are only passed on new sessions, not on resumed sessions.
+     * When resuming, Goose uses the extensions that were configured when the session started.
+     * Passing new extension flags on resume causes "Resume cancelled" errors.
      * </p>
      */
     private List<String> buildSessionCommand(String sessionName, String prompt, boolean resume, GooseOptions options) {
@@ -540,8 +545,13 @@ public class GooseExecutorImpl implements GooseExecutor {
         }
         
         // Add configured extensions from goose-extensions.json
-        // The buildpack generates this file during staging with MCP server URLs
-        addExtensionsFromConfig(command);
+        // ONLY for new sessions - resumed sessions use their original extensions
+        // Passing extension flags on resume causes "Resume cancelled" error
+        if (!resume) {
+            addExtensionsFromConfig(command);
+        } else {
+            logger.debug("Resuming session '{}' - skipping extension flags", sessionName);
+        }
         
         // Add the prompt using -t flag
         command.add("-t");
