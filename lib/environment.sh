@@ -47,6 +47,18 @@ if [ -d "/home/vcap/app/.config/goose" ]; then
     fi
 fi
 
+# Copy skills from .goose/skills/ to ~/.config/goose/skills/ (project-level skills)
+# Goose looks for skills in multiple locations, project-level skills have priority
+if [ -d "/home/vcap/app/.goose/skills" ]; then
+    echo "[goose-env] Copying project skills to \$HOME/.config/goose/skills/"
+    mkdir -p "\$GOOSE_CONFIG_DIR/skills"
+    cp -r /home/vcap/app/.goose/skills/* "\$GOOSE_CONFIG_DIR/skills/" 2>/dev/null || true
+    
+    # List installed skills
+    skill_count=\$(find "\$GOOSE_CONFIG_DIR/skills" -name "SKILL.md" 2>/dev/null | wc -l)
+    echo "[goose-env] Found \$skill_count skill(s) installed"
+fi
+
 # Provider configuration
 # Supported providers: openai, anthropic, google, databricks, ollama, etc.
 # These are set from config file or environment variables

@@ -12,6 +12,7 @@ This buildpack installs the Goose CLI (a native Rust binary) into Cloud Foundry 
 - **Multi-Provider Support** - Works with Anthropic, OpenAI, Google, Databricks, Ollama, and more
 - **Java Wrapper Library** - Clean Java API for invoking Goose from Spring Boot applications
 - **MCP Support** - Configure Model Context Protocol servers to extend capabilities
+- **Skills Support** - Define reusable instruction sets for common workflows
 - **Spring Boot Ready** - Auto-configuration for seamless Spring Boot integration
 
 ## Quick Start
@@ -120,7 +121,87 @@ goose:
         - "@modelcontextprotocol/server-github"
       env:
         GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+  
+  # Skills (optional) - reusable instruction sets
+  skills:
+    - name: code-review
+      description: Code review checklist
+      content: |
+        # Code Review Checklist
+        - [ ] Code does what the PR claims
+        - [ ] Edge cases handled
+        - [ ] Follows project style guide
 ```
+
+## Skills
+
+Skills are reusable sets of instructions that teach Goose how to perform specific tasks. They follow the [Agent Skills](https://block.github.io/goose/docs/guides/context-engineering/using-skills) format compatible with Claude Desktop and other agents.
+
+### Skill Types
+
+The buildpack supports three types of skills:
+
+#### 1. Inline Skills
+
+Embed skill content directly in your `.goose-config.yml`:
+
+```yaml
+skills:
+  - name: production-deploy
+    description: Safe deployment procedure for production
+    content: |
+      # Production Deployment
+      ## Pre-deployment
+      1. Ensure all tests pass
+      2. Get approval from reviewers
+      3. Notify #deployments channel
+      ## Deploy
+      1. Create release branch from main
+      2. Run ./gradlew build
+      3. Deploy to staging, verify, then production
+```
+
+#### 2. File-Based Skills
+
+Reference skills from directories in your application:
+
+```yaml
+skills:
+  - name: deployment
+    path: .goose/skills/deployment
+```
+
+The skill directory must contain a `SKILL.md` file with YAML frontmatter:
+
+```markdown
+---
+name: deployment
+description: Deployment workflow for this project
+---
+
+# Deployment Steps
+1. Build the application
+2. Run integration tests
+...
+```
+
+#### 3. Git-Based Skills
+
+Clone skills from a Git repository during staging:
+
+```yaml
+skills:
+  - name: company-standards
+    source: https://github.com/org/goose-skills.git
+    branch: main
+    path: skills/company-standards
+```
+
+> **Note:** Git-based skills require network access during Cloud Foundry staging.
+
+### Skill Locations
+
+Skills are installed to `.goose/skills/` in the application directory and copied to `~/.config/goose/skills/` at runtime. Goose automatically discovers and uses skills based on your requests.
 
 ## Java Wrapper Library
 
@@ -243,6 +324,7 @@ MIT License - see [LICENSE](LICENSE)
 
 - [Goose GitHub Repository](https://github.com/block/goose)
 - [Goose Documentation](https://block.github.io/goose/)
+- [Goose Skills Guide](https://block.github.io/goose/docs/guides/context-engineering/using-skills)
 - [Cloud Foundry Buildpack Documentation](https://docs.cloudfoundry.org/buildpacks/)
 - [MCP (Model Context Protocol)](https://modelcontextprotocol.io/)
 
