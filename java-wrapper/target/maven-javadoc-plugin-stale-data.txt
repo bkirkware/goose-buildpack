@@ -1,0 +1,98 @@
+@options
+@packages
+-classpath
+'/Users/corby/.m2/repository/org/slf4j/slf4j-api/2.0.17/slf4j-api-2.0.17.jar:/Users/corby/.m2/repository/org/springframework/boot/spring-boot-starter/3.5.8/spring-boot-starter-3.5.8.jar:/Users/corby/.m2/repository/org/springframework/boot/spring-boot/3.5.8/spring-boot-3.5.8.jar:/Users/corby/.m2/repository/org/springframework/spring-context/6.2.14/spring-context-6.2.14.jar:/Users/corby/.m2/repository/org/springframework/spring-aop/6.2.14/spring-aop-6.2.14.jar:/Users/corby/.m2/repository/org/springframework/spring-expression/6.2.14/spring-expression-6.2.14.jar:/Users/corby/.m2/repository/org/springframework/boot/spring-boot-starter-logging/3.5.8/spring-boot-starter-logging-3.5.8.jar:/Users/corby/.m2/repository/org/apache/logging/log4j/log4j-to-slf4j/2.24.3/log4j-to-slf4j-2.24.3.jar:/Users/corby/.m2/repository/org/apache/logging/log4j/log4j-api/2.24.3/log4j-api-2.24.3.jar:/Users/corby/.m2/repository/org/slf4j/jul-to-slf4j/2.0.17/jul-to-slf4j-2.0.17.jar:/Users/corby/.m2/repository/jakarta/annotation/jakarta.annotation-api/2.1.1/jakarta.annotation-api-2.1.1.jar:/Users/corby/.m2/repository/org/springframework/spring-core/6.2.14/spring-core-6.2.14.jar:/Users/corby/.m2/repository/org/springframework/spring-jcl/6.2.14/spring-jcl-6.2.14.jar:/Users/corby/.m2/repository/org/yaml/snakeyaml/2.4/snakeyaml-2.4.jar:/Users/corby/.m2/repository/org/springframework/boot/spring-boot-starter-webflux/3.5.8/spring-boot-starter-webflux-3.5.8.jar:/Users/corby/.m2/repository/org/springframework/boot/spring-boot-starter-json/3.5.8/spring-boot-starter-json-3.5.8.jar:/Users/corby/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.19.4/jackson-databind-2.19.4.jar:/Users/corby/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.19.4/jackson-annotations-2.19.4.jar:/Users/corby/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.19.4/jackson-core-2.19.4.jar:/Users/corby/.m2/repository/com/fasterxml/jackson/datatype/jackson-datatype-jdk8/2.19.4/jackson-datatype-jdk8-2.19.4.jar:/Users/corby/.m2/repository/com/fasterxml/jackson/datatype/jackson-datatype-jsr310/2.19.4/jackson-datatype-jsr310-2.19.4.jar:/Users/corby/.m2/repository/com/fasterxml/jackson/module/jackson-module-parameter-names/2.19.4/jackson-module-parameter-names-2.19.4.jar:/Users/corby/.m2/repository/org/springframework/boot/spring-boot-starter-reactor-netty/3.5.8/spring-boot-starter-reactor-netty-3.5.8.jar:/Users/corby/.m2/repository/io/projectreactor/netty/reactor-netty-http/1.2.12/reactor-netty-http-1.2.12.jar:/Users/corby/.m2/repository/io/netty/netty-codec-http/4.1.128.Final/netty-codec-http-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-common/4.1.128.Final/netty-common-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-buffer/4.1.128.Final/netty-buffer-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-transport/4.1.128.Final/netty-transport-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-codec/4.1.128.Final/netty-codec-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-handler/4.1.128.Final/netty-handler-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-codec-http2/4.1.128.Final/netty-codec-http2-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-resolver-dns/4.1.128.Final/netty-resolver-dns-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-resolver/4.1.128.Final/netty-resolver-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-codec-dns/4.1.128.Final/netty-codec-dns-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-resolver-dns-native-macos/4.1.128.Final/netty-resolver-dns-native-macos-4.1.128.Final-osx-x86_64.jar:/Users/corby/.m2/repository/io/netty/netty-resolver-dns-classes-macos/4.1.128.Final/netty-resolver-dns-classes-macos-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-transport-native-epoll/4.1.128.Final/netty-transport-native-epoll-4.1.128.Final-linux-x86_64.jar:/Users/corby/.m2/repository/io/netty/netty-transport-native-unix-common/4.1.128.Final/netty-transport-native-unix-common-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-transport-classes-epoll/4.1.128.Final/netty-transport-classes-epoll-4.1.128.Final.jar:/Users/corby/.m2/repository/io/projectreactor/netty/reactor-netty-core/1.2.12/reactor-netty-core-1.2.12.jar:/Users/corby/.m2/repository/io/netty/netty-handler-proxy/4.1.128.Final/netty-handler-proxy-4.1.128.Final.jar:/Users/corby/.m2/repository/io/netty/netty-codec-socks/4.1.128.Final/netty-codec-socks-4.1.128.Final.jar:/Users/corby/.m2/repository/org/springframework/spring-web/6.2.14/spring-web-6.2.14.jar:/Users/corby/.m2/repository/org/springframework/spring-beans/6.2.14/spring-beans-6.2.14.jar:/Users/corby/.m2/repository/io/micrometer/micrometer-observation/1.15.6/micrometer-observation-1.15.6.jar:/Users/corby/.m2/repository/io/micrometer/micrometer-commons/1.15.6/micrometer-commons-1.15.6.jar:/Users/corby/.m2/repository/org/springframework/spring-webflux/6.2.14/spring-webflux-6.2.14.jar:/Users/corby/.m2/repository/io/projectreactor/reactor-core/3.7.13/reactor-core-3.7.13.jar:/Users/corby/.m2/repository/org/reactivestreams/reactive-streams/1.0.4/reactive-streams-1.0.4.jar:/Users/corby/.m2/repository/org/springframework/boot/spring-boot-autoconfigure/3.5.8/spring-boot-autoconfigure-3.5.8.jar'
+-encoding
+'UTF-8'
+-protected
+-quiet
+--release
+21
+-sourcepath
+'/Users/corby/Projects/goose/goose-buildpack/java-wrapper/src/main/java:/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/generated-sources/annotations'
+-author
+-bottom
+'Copyright &#169; 2026. All rights reserved.'
+-charset
+'UTF-8'
+-d
+'/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs'
+-docencoding
+'UTF-8'
+-Xdoclint:all,-missing
+-doctitle
+'Goose Cloud Foundry Wrapper 1.0.0 API'
+-use
+-version
+-windowtitle
+'Goose Cloud Foundry Wrapper 1.0.0 API'
+org.tanzu.goose.cf
+org.tanzu.goose.cf.spring
+/Users/corby/.m2/repository/org/slf4j/slf4j-api/2.0.17/slf4j-api-2.0.17.jar = 1740501792000
+/Users/corby/.m2/repository/org/springframework/boot/spring-boot-starter/3.5.8/spring-boot-starter-3.5.8.jar = 1763647630000
+/Users/corby/.m2/repository/org/springframework/boot/spring-boot/3.5.8/spring-boot-3.5.8.jar = 1763647630000
+/Users/corby/.m2/repository/org/springframework/spring-context/6.2.14/spring-context-6.2.14.jar = 1763627765000
+/Users/corby/.m2/repository/org/springframework/spring-aop/6.2.14/spring-aop-6.2.14.jar = 1763627765000
+/Users/corby/.m2/repository/org/springframework/spring-expression/6.2.14/spring-expression-6.2.14.jar = 1763627765000
+/Users/corby/.m2/repository/org/springframework/boot/spring-boot-starter-logging/3.5.8/spring-boot-starter-logging-3.5.8.jar = 1763647631000
+/Users/corby/.m2/repository/org/apache/logging/log4j/log4j-to-slf4j/2.24.3/log4j-to-slf4j-2.24.3.jar = 1733827912000
+/Users/corby/.m2/repository/org/apache/logging/log4j/log4j-api/2.24.3/log4j-api-2.24.3.jar = 1733827907000
+/Users/corby/.m2/repository/org/slf4j/jul-to-slf4j/2.0.17/jul-to-slf4j-2.0.17.jar = 1740501965000
+/Users/corby/.m2/repository/jakarta/annotation/jakarta.annotation-api/2.1.1/jakarta.annotation-api-2.1.1.jar = 1655206218000
+/Users/corby/.m2/repository/org/springframework/spring-core/6.2.14/spring-core-6.2.14.jar = 1763627765000
+/Users/corby/.m2/repository/org/springframework/spring-jcl/6.2.14/spring-jcl-6.2.14.jar = 1763627765000
+/Users/corby/.m2/repository/org/yaml/snakeyaml/2.4/snakeyaml-2.4.jar = 1739616888000
+/Users/corby/.m2/repository/org/springframework/boot/spring-boot-starter-webflux/3.5.8/spring-boot-starter-webflux-3.5.8.jar = 1763647630000
+/Users/corby/.m2/repository/org/springframework/boot/spring-boot-starter-json/3.5.8/spring-boot-starter-json-3.5.8.jar = 1763647630000
+/Users/corby/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.19.4/jackson-databind-2.19.4.jar = 1761782660000
+/Users/corby/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.19.4/jackson-annotations-2.19.4.jar = 1761779955000
+/Users/corby/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.19.4/jackson-core-2.19.4.jar = 1761780206000
+/Users/corby/.m2/repository/com/fasterxml/jackson/datatype/jackson-datatype-jdk8/2.19.4/jackson-datatype-jdk8-2.19.4.jar = 1761783639000
+/Users/corby/.m2/repository/com/fasterxml/jackson/datatype/jackson-datatype-jsr310/2.19.4/jackson-datatype-jsr310-2.19.4.jar = 1761783639000
+/Users/corby/.m2/repository/com/fasterxml/jackson/module/jackson-module-parameter-names/2.19.4/jackson-module-parameter-names-2.19.4.jar = 1761783639000
+/Users/corby/.m2/repository/org/springframework/boot/spring-boot-starter-reactor-netty/3.5.8/spring-boot-starter-reactor-netty-3.5.8.jar = 1763647630000
+/Users/corby/.m2/repository/io/projectreactor/netty/reactor-netty-http/1.2.12/reactor-netty-http-1.2.12.jar = 1762510508000
+/Users/corby/.m2/repository/io/netty/netty-codec-http/4.1.128.Final/netty-codec-http-4.1.128.Final.jar = 1760453006000
+/Users/corby/.m2/repository/io/netty/netty-common/4.1.128.Final/netty-common-4.1.128.Final.jar = 1760453007000
+/Users/corby/.m2/repository/io/netty/netty-buffer/4.1.128.Final/netty-buffer-4.1.128.Final.jar = 1760453008000
+/Users/corby/.m2/repository/io/netty/netty-transport/4.1.128.Final/netty-transport-4.1.128.Final.jar = 1760453006000
+/Users/corby/.m2/repository/io/netty/netty-codec/4.1.128.Final/netty-codec-4.1.128.Final.jar = 1760453007000
+/Users/corby/.m2/repository/io/netty/netty-handler/4.1.128.Final/netty-handler-4.1.128.Final.jar = 1760453007000
+/Users/corby/.m2/repository/io/netty/netty-codec-http2/4.1.128.Final/netty-codec-http2-4.1.128.Final.jar = 1760453007000
+/Users/corby/.m2/repository/io/netty/netty-resolver-dns/4.1.128.Final/netty-resolver-dns-4.1.128.Final.jar = 1760453006000
+/Users/corby/.m2/repository/io/netty/netty-resolver/4.1.128.Final/netty-resolver-4.1.128.Final.jar = 1760453007000
+/Users/corby/.m2/repository/io/netty/netty-codec-dns/4.1.128.Final/netty-codec-dns-4.1.128.Final.jar = 1760453007000
+/Users/corby/.m2/repository/io/netty/netty-resolver-dns-native-macos/4.1.128.Final/netty-resolver-dns-native-macos-4.1.128.Final-osx-x86_64.jar = 1760453007000
+/Users/corby/.m2/repository/io/netty/netty-resolver-dns-classes-macos/4.1.128.Final/netty-resolver-dns-classes-macos-4.1.128.Final.jar = 1760453007000
+/Users/corby/.m2/repository/io/netty/netty-transport-native-epoll/4.1.128.Final/netty-transport-native-epoll-4.1.128.Final-linux-x86_64.jar = 1760453006000
+/Users/corby/.m2/repository/io/netty/netty-transport-native-unix-common/4.1.128.Final/netty-transport-native-unix-common-4.1.128.Final.jar = 1760453007000
+/Users/corby/.m2/repository/io/netty/netty-transport-classes-epoll/4.1.128.Final/netty-transport-classes-epoll-4.1.128.Final.jar = 1760453007000
+/Users/corby/.m2/repository/io/projectreactor/netty/reactor-netty-core/1.2.12/reactor-netty-core-1.2.12.jar = 1762510509000
+/Users/corby/.m2/repository/io/netty/netty-handler-proxy/4.1.128.Final/netty-handler-proxy-4.1.128.Final.jar = 1760453007000
+/Users/corby/.m2/repository/io/netty/netty-codec-socks/4.1.128.Final/netty-codec-socks-4.1.128.Final.jar = 1760453006000
+/Users/corby/.m2/repository/org/springframework/spring-web/6.2.14/spring-web-6.2.14.jar = 1763627765000
+/Users/corby/.m2/repository/org/springframework/spring-beans/6.2.14/spring-beans-6.2.14.jar = 1763627765000
+/Users/corby/.m2/repository/io/micrometer/micrometer-observation/1.15.6/micrometer-observation-1.15.6.jar = 1762416025000
+/Users/corby/.m2/repository/io/micrometer/micrometer-commons/1.15.6/micrometer-commons-1.15.6.jar = 1762416025000
+/Users/corby/.m2/repository/org/springframework/spring-webflux/6.2.14/spring-webflux-6.2.14.jar = 1763627765000
+/Users/corby/.m2/repository/io/projectreactor/reactor-core/3.7.13/reactor-core-3.7.13.jar = 1762505230000
+/Users/corby/.m2/repository/org/reactivestreams/reactive-streams/1.0.4/reactive-streams-1.0.4.jar = 1653252067000
+/Users/corby/.m2/repository/org/springframework/boot/spring-boot-autoconfigure/3.5.8/spring-boot-autoconfigure-3.5.8.jar = 1763647631000
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/src/main/java = 1767830634125
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/generated-sources/annotations = 1767883082065
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/constant-values.html = 1767883083383
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/tag-search-index.js = 1767883083406
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/overview-tree.html = 1767883083399
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/module-search-index.js = 1767883083405
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/index.html = 1767883083399
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/package-search-index.js = 1767883083405
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/serialized-form.html = 1767883083385
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/index-all.html = 1767883083412
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/allpackages-index.html = 1767883083405
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/member-search-index.js = 1767883083406
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/overview-summary.html = 1767883083413
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/help-doc.html = 1767883083414
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/element-list = 1767883083376
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/search.html = 1767883083412
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/allclasses-index.html = 1767883083404
+/Users/corby/Projects/goose/goose-buildpack/java-wrapper/target/apidocs/type-search-index.js = 1767883083405

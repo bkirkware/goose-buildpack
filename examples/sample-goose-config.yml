@@ -1,0 +1,56 @@
+---
+# Sample .goose-config.yml
+# Place this file in your application root to enable Goose buildpack
+
+goose:
+  # Enable Goose CLI installation
+  enabled: true
+
+  # Goose CLI version
+  # Use "stable" for the stable release, or specify a version like "v1.19.0"
+  version: "stable"
+
+  # LLM Provider configuration
+  # Goose supports multiple providers - set credentials via environment variables
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+
+  # Log level for Goose CLI
+  logLevel: "info"          # debug, info, warn, error
+
+  # MCP (Model Context Protocol) Servers
+  # Configure MCP servers to extend Goose capabilities
+  mcpServers: []
+
+  # Example MCP server configurations:
+  #
+  # Local stdio MCP servers:
+  # mcpServers:
+  #   - name: filesystem
+  #     type: stdio
+  #     command: npx
+  #     args:
+  #       - "-y"
+  #       - "@modelcontextprotocol/server-filesystem"
+  #     env:
+  #       ALLOWED_DIRECTORIES: "/home/vcap/app,/tmp"
+  #
+  #   - name: github
+  #     type: stdio
+  #     command: npx
+  #     args:
+  #       - "-y"
+  #       - "@modelcontextprotocol/server-github"
+  #     env:
+  #       GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+  #
+  # Remote SSE MCP servers:
+  #   - name: custom-server
+  #     type: sse
+  #     url: "https://mcp-server.example.com/sse"
+
+  # Extension configuration
+  # extensions:
+  #   developer:
+  #     enabled: true
+

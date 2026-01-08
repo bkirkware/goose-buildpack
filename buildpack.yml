@@ -1,0 +1,42 @@
+---
+# Buildpack Configuration
+name: goose-buildpack
+version: 1.0.0
+description: Cloud Foundry buildpack for bundling Goose CLI into containers
+
+# Default configuration values
+defaults:
+  goose:
+    version: stable
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+
+# Dependencies
+dependencies:
+  - name: goose
+    version: stable
+    uri: https://github.com/block/goose/releases/download/stable/goose-x86_64-unknown-linux-gnu.tar.bz2
+
+# Buildpack metadata
+metadata:
+  language: multi
+  type: supply
+  final: false
+
+# Include and exclude patterns for buildpack packaging
+include:
+  - bin/**
+  - lib/**
+  - resources/**
+  - buildpack.yml
+  - manifest.yml
+  - VERSION
+  - README.md
+
+exclude:
+  - tests/**
+  - examples/**
+  - docs/**
+  - .git/**
+  - "*.md"
+

@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# bin/supply: Supply script for Goose buildpack
+# Installs Goose CLI (native Rust binary) into the container
+
+set -e
+set -o pipefail
+
+# Arguments
+BUILD_DIR=$1
+CACHE_DIR=$2
+DEPS_DIR=$3
+INDEX=$4
+
+# Buildpack directory
+BP_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+# Dependency installation directory
+DEPS_INDEX_DIR="${DEPS_DIR}/${INDEX}"
+
+# Source helper libraries
+source "${BP_DIR}/lib/environment.sh"
+source "${BP_DIR}/lib/installer.sh"
+source "${BP_DIR}/lib/validator.sh"
+source "${BP_DIR}/lib/goose_configurator.sh"
+
+# Create necessary directories
+mkdir -p "${DEPS_INDEX_DIR}/bin"
+mkdir -p "${DEPS_INDEX_DIR}/lib"
+mkdir -p "${CACHE_DIR}"
+# Note: .profile.d is created in BUILD_DIR by setup_environment()
+
+echo "-----> Goose CLI Buildpack"
+
+# Validate environment
+echo "       Validating environment..."
+validate_environment "${BUILD_DIR}"
+
+# Install Goose CLI (native binary - no runtime required)
+echo "       Installing Goose CLI..."
+install_goose "${DEPS_INDEX_DIR}" "${CACHE_DIR}"
+
+# Set up environment variables
+echo "       Configuring environment..."
+setup_environment "${DEPS_INDEX_DIR}" "${BUILD_DIR}" "${INDEX}"
+
+# Create configuration files
+echo "       Creating configuration files..."
+create_config_files "${DEPS_INDEX_DIR}" "${BUILD_DIR}"
+
+# Extract .goose-config.yml from JAR if it's a Spring Boot application
+if [ ! -f "${BUILD_DIR}/.goose-config.yml" ] && [ ! -f "${BUILD_DIR}/.goose-config.yaml" ]; then
+    echo "       Checking for config in JAR files..."
+    
+    # First, check if this is an exploded Spring Boot JAR (Java buildpack explodes JARs)
+    if [ -f "${BUILD_DIR}/BOOT-INF/classes/.goose-config.yml" ]; then
+        echo "       Found .goose-config.yml in exploded JAR (BOOT-INF/classes/)"
+        cp "${BUILD_DIR}/BOOT-INF/classes/.goose-config.yml" "${BUILD_DIR}/.goose-config.yml"
+        echo "       Copied .goose-config.yml to application root"
+    elif [ -f "${BUILD_DIR}/BOOT-INF/classes/.goose-config.yaml" ]; then
+        echo "       Found .goose-config.yaml in exploded JAR (BOOT-INF/classes/)"
+        cp "${BUILD_DIR}/BOOT-INF/classes/.goose-config.yaml" "${BUILD_DIR}/.goose-config.yml"
+        echo "       Copied .goose-config.yaml to application root"
+    else
+        # Fall back to looking for actual JAR files (in case Java buildpack runs after us)
+        jar_count=0
+        for jar_file in "${BUILD_DIR}"/*.jar; do
+            if [ -f "${jar_file}" ]; then
+                jar_count=$((jar_count + 1))
+                echo "       Found JAR #${jar_count}: $(basename ${jar_file})"
+                # Try to extract .goose-config.yml from the JAR root
+                if unzip -p "${jar_file}" .goose-config.yml > "${BUILD_DIR}/.goose-config.yml" 2>/dev/null; then
+                    echo "       Extracted .goose-config.yml from JAR root"
+                    break
+                fi
+                # Try to extract .goose-config.yaml from the JAR root
+                if unzip -p "${jar_file}" .goose-config.yaml > "${BUILD_DIR}/.goose-config.yml" 2>/dev/null; then
+                    echo "       Extracted .goose-config.yaml from JAR root"
+                    break
+                fi
+                # Try to extract from Spring Boot JAR structure (BOOT-INF/classes/)
+                if unzip -p "${jar_file}" BOOT-INF/classes/.goose-config.yml > "${BUILD_DIR}/.goose-config.yml" 2>/dev/null; then
+                    echo "       Extracted .goose-config.yml from BOOT-INF/classes/"
+                    break
+                fi
+                if unzip -p "${jar_file}" BOOT-INF/classes/.goose-config.yaml > "${BUILD_DIR}/.goose-config.yml" 2>/dev/null; then
+                    echo "       Extracted .goose-config.yaml from BOOT-INF/classes/"
+                    break
+                fi
+            fi
+        done
+        if [ ${jar_count} -eq 0 ]; then
+            echo "       No JAR files or exploded JAR config found"
+        fi
+    fi
+fi
+
+# Configure Goose (MCP servers and settings)
+configure_goose "${BUILD_DIR}"
+
+# Configure Plugin Marketplaces (clone git repos, install plugins)
+# Note: This requires network access during staging for git clone operations
+configure_plugin_marketplaces "${BUILD_DIR}" "${DEPS_DIR}" "${INDEX}"
+
+# Verify installation
+echo "       Verifying installation..."
+verify_installation "${DEPS_INDEX_DIR}"
+
+echo "       Goose CLI installed successfully!"
+echo "       Version: $(get_goose_version "${DEPS_INDEX_DIR}")"
+

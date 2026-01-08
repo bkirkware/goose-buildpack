@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# bin/detect: Detection script for Goose buildpack
+# Exit 0 if this buildpack should be applied, exit 1 otherwise
+
+set -e
+
+BUILD_DIR=$1
+
+# Buildpack metadata
+BUILDPACK_NAME="Goose CLI"
+BUILDPACK_VERSION="1.0.0"
+
+# Detection logic
+# Check for .goose-config.yml in the application root
+if [ -f "${BUILD_DIR}/.goose-config.yml" ]; then
+    echo "${BUILDPACK_NAME} ${BUILDPACK_VERSION}"
+    exit 0
+fi
+
+# Check for .goose-config.yaml (alternate extension)
+if [ -f "${BUILD_DIR}/.goose-config.yaml" ]; then
+    echo "${BUILDPACK_NAME} ${BUILDPACK_VERSION}"
+    exit 0
+fi
+
+# Check for .goose-config.yml inside JAR files (Spring Boot apps)
+for jar_file in "${BUILD_DIR}"/*.jar; do
+    if [ -f "${jar_file}" ]; then
+        if unzip -l "${jar_file}" 2>/dev/null | grep -q "\.goose-config\.yml"; then
+            echo "${BUILDPACK_NAME} ${BUILDPACK_VERSION}"
+            exit 0
+        fi
+        if unzip -l "${jar_file}" 2>/dev/null | grep -q "\.goose-config\.yaml"; then
+            echo "${BUILDPACK_NAME} ${BUILDPACK_VERSION}"
+            exit 0
+        fi
+    fi
+done
+
+# Check for GOOSE_ENABLED environment variable
+if [ "${GOOSE_ENABLED}" == "true" ]; then
+    echo "${BUILDPACK_NAME} ${BUILDPACK_VERSION}"
+    exit 0
+fi
+
+# Check for manifest.yml with goose-enabled setting
+# Note: This is simplified - in a real implementation, you'd parse YAML properly
+if [ -f "${BUILD_DIR}/manifest.yml" ]; then
+    if grep -q "goose-enabled.*true" "${BUILD_DIR}/manifest.yml" 2>/dev/null; then
+        echo "${BUILDPACK_NAME} ${BUILDPACK_VERSION}"
+        exit 0
+    fi
+fi
+
+# Buildpack not applicable
+exit 1
+

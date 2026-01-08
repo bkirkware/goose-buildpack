@@ -1,0 +1,32 @@
+---
+# Goose Buildpack Manifest
+# This file is used for buildpack metadata when uploading to Cloud Foundry
+
+language: multi
+version: 1.0.0
+
+# Default versions
+default_versions:
+  - name: goose
+    version: stable
+
+# Dependency information
+dependency_deprecation_dates: []
+
+# Pre-package tasks
+pre_package: scripts/build.sh
+
+# Include/exclude files in buildpack package
+include_files:
+  - bin/detect
+  - bin/supply
+  - lib/environment.sh
+  - lib/goose_configurator.sh
+  - lib/installer.sh
+  - lib/validator.sh
+  - resources/default-config.yml
+  - buildpack.yml
+  - manifest.yml
+  - VERSION
+  - README.md
+

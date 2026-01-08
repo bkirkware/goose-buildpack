@@ -1,0 +1,55 @@
+---
+# Sample Cloud Foundry Application Manifest
+# This demonstrates how to use the Goose buildpack with a Java application
+
+applications:
+- name: my-java-app
+  memory: 1G
+  instances: 1
+
+  # Buildpack chain: Goose (supply) -> Java (final)
+  # Note: Goose is a native binary, no Node.js required!
+  buildpacks:
+    - goose-buildpack             # This buildpack (supply)
+    - java_buildpack              # Final buildpack for Java app
+
+  # Required environment variables
+  env:
+    # LLM Provider Authentication (choose one or more)
+    # Anthropic (Claude)
+    ANTHROPIC_API_KEY: sk-ant-xxxxxxxxxxxxx
+
+    # OpenAI (alternative provider)
+    # OPENAI_API_KEY: sk-xxxxxxxxxxxxx
+
+    # Google (alternative provider)
+    # GOOGLE_API_KEY: xxxxxxxxxxxxx
+
+    # Databricks (alternative provider)
+    # DATABRICKS_HOST: https://xxx.databricks.com
+    # DATABRICKS_TOKEN: xxxxxxxxxxxxx
+
+    # Ollama (local inference, alternative provider)
+    # OLLAMA_HOST: http://ollama.apps.example.com
+
+    GOOSE_ENABLED: true
+
+    # Optional: Goose settings
+    GOOSE_VERSION: stable                       # or specific version like "v1.19.0"
+    GOOSE_PROVIDER: anthropic                   # anthropic, openai, google, databricks, ollama
+    GOOSE_MODEL: claude-sonnet-4-20250514                 # Provider-specific model name
+    GOOSE_LOG_LEVEL: info                       # debug, info, warn, error
+
+    # Optional: Execution settings for Java wrapper
+    GOOSE_TIMEOUT_MINUTES: 5                    # Max execution time per request
+    GOOSE_MAX_TURNS: 100                        # Max conversation turns
+
+  # Optional: Health check configuration
+  health-check-type: http
+  health-check-http-endpoint: /health
+
+  # Optional: Service bindings
+  # services:
+  #   - my-postgres-db
+  #   - my-redis-cache
+

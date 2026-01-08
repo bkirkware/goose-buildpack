@@ -1,0 +1,4 @@
+# Spring Boot Auto-Configuration
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+org.tanzu.goose.cf.spring.GooseAutoConfiguration
+

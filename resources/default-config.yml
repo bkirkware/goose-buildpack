@@ -1,0 +1,70 @@
+---
+# Default Goose Configuration Template
+# Copy this file to your application root as .goose-config.yml
+
+goose:
+  # Enable Goose CLI installation
+  enabled: true
+
+  # Goose CLI version (use "stable", "latest", or specific version like "v1.19.0")
+  version: "stable"
+
+  # LLM Provider configuration
+  # Supported providers: anthropic, openai, google, databricks, ollama, azure, bedrock
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+
+  # CLI behavior settings
+  settings:
+    logLevel: "info"          # Log level: debug, info, warn, error
+    maxTurns: 100             # Maximum conversation turns (prevents runaway sessions)
+
+  # MCP (Model Context Protocol) Servers
+  # Note: MCP configuration extends Goose capabilities
+  mcpServers: []
+
+  # Example MCP servers (uncomment to enable):
+  #
+  # - name: filesystem
+  #   type: stdio
+  #   command: npx
+  #   args:
+  #     - "-y"
+  #     - "@modelcontextprotocol/server-filesystem"
+  #   env:
+  #     ALLOWED_DIRECTORIES: "/home/vcap/app,/tmp"
+  #
+  # - name: github
+  #   type: stdio
+  #   command: npx
+  #   args:
+  #     - "-y"
+  #     - "@modelcontextprotocol/server-github"
+  #   env:
+  #     GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+  #
+  # - name: postgres
+  #   type: stdio
+  #   command: npx
+  #   args:
+  #     - "-y"
+  #     - "@modelcontextprotocol/server-postgres"
+  #   env:
+  #     POSTGRES_CONNECTION_STRING: ${DATABASE_URL}
+
+  # Plugin Marketplaces Configuration
+  # Install plugins from git-based marketplace repositories
+  # Note: Requires network access during Cloud Foundry staging for git clone
+  #
+  # pluginMarketplaces: []
+  #
+  # Example plugin marketplaces (uncomment to enable):
+  #
+  # pluginMarketplaces:
+  #   - name: my-marketplace
+  #     source: https://github.com/org/goose-plugins.git
+  #     branch: main
+  #     plugins:
+  #       - plugin-name-1
+  #       - plugin-name-2
+
