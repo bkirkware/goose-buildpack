@@ -651,3 +651,469 @@ configure_plugin_marketplaces() {
     return 0
 }
 
+
+# ============================================================================
+# Skills Configuration Functions
+# ============================================================================
+# Skills are reusable sets of instructions that teach Goose how to perform
+# specific tasks. They follow the Agent Skills format compatible with Claude
+# Desktop and other agents.
+# See: https://block.github.io/goose/docs/guides/context-engineering/using-skills
+
+# Parse skills from YAML configuration file
+# Outputs JSON array of skill configurations to stdout
+parse_skills() {
+    local config_file=$1
+    local output_file=$2
+
+    if [ ! -f "${config_file}" ]; then
+        echo "[]" > "${output_file}"
+        return 1
+    fi
+
+    # Check if file has skills section
+    if ! grep -qE "^[[:space:]]*skills:" "${config_file}"; then
+        echo "[]" > "${output_file}"
+        return 1
+    fi
+
+    # Use Python for YAML parsing
+    if command -v python3 > /dev/null 2>&1; then
+        python3 - "${config_file}" > "${output_file}" 2>/dev/null <<'PYTHON_SCRIPT'
+import sys
+import re
+import json
+
+if len(sys.argv) < 2:
+    print("[]")
+    sys.exit(0)
+
+config_file = sys.argv[1]
+
+try:
+    with open(config_file, 'r') as f:
+        content = f.read()
+except Exception as e:
+    print("[]")
+    sys.exit(0)
+
+skills = []
+in_skills = False
+current_skill = None
+skills_indent = 0
+in_content = False
+content_indent = 0
+content_lines = []
+
+lines = content.split('\n')
+
+def get_indent(line):
+    return len(line) - len(line.lstrip())
+
+for i, line in enumerate(lines):
+    stripped = line.strip()
+    current_indent = get_indent(line)
+    
+    # Handle multi-line content continuation
+    if in_content:
+        if stripped == '' or current_indent > content_indent:
+            # Still in content block
+            # Preserve relative indentation for content
+            if stripped:
+                relative_indent = current_indent - content_indent - 2
+                if relative_indent > 0:
+                    content_lines.append(' ' * relative_indent + stripped)
+                else:
+                    content_lines.append(stripped)
+            else:
+                content_lines.append('')
+            continue
+        else:
+            # End of content block
+            in_content = False
+            if current_skill and content_lines:
+                current_skill['content'] = '\n'.join(content_lines).strip()
+            content_lines = []
+    
+    # Skip comments and empty lines
+    if not stripped or stripped.startswith('#'):
+        continue
+    
+    # Detect start of skills section
+    if re.match(r'^skills:', stripped):
+        in_skills = True
+        skills_indent = current_indent
+        continue
+    
+    # Detect end of skills section (new top-level key at same or lower indent)
+    if in_skills and current_indent <= skills_indent and re.match(r'^[a-zA-Z]', stripped) and not stripped.startswith('-'):
+        in_skills = False
+        if current_skill and current_skill.get('name'):
+            skills.append(current_skill)
+            current_skill = None
+        continue
+    
+    if in_skills:
+        # Detect start of new skill item
+        if re.match(r'-\s+name:', stripped):
+            # Save previous skill
+            if current_skill and current_skill.get('name'):
+                skills.append(current_skill)
+            
+            # Start new skill
+            match = re.search(r'name:\s*(.+)', stripped)
+            current_skill = {
+                'name': match.group(1).strip().strip('"').strip("'") if match else None,
+                'description': None,
+                'content': None,
+                'path': None,
+                'source': None,
+                'branch': 'main'
+            }
+            continue
+        
+        # Parse skill properties
+        if current_skill is not None:
+            if re.match(r'^\s+description:', line):
+                match = re.search(r'description:\s*(.+)', stripped)
+                if match:
+                    current_skill['description'] = match.group(1).strip().strip('"').strip("'")
+            
+            elif re.match(r'^\s+path:', line):
+                match = re.search(r'path:\s*(.+)', stripped)
+                if match:
+                    current_skill['path'] = match.group(1).strip().strip('"').strip("'")
+            
+            elif re.match(r'^\s+source:', line):
+                match = re.search(r'source:\s*(.+)', stripped)
+                if match:
+                    current_skill['source'] = match.group(1).strip().strip('"').strip("'")
+            
+            elif re.match(r'^\s+branch:', line):
+                match = re.search(r'branch:\s*(.+)', stripped)
+                if match:
+                    current_skill['branch'] = match.group(1).strip().strip('"').strip("'")
+            
+            elif re.match(r'^\s+content:', line):
+                # Check if content is inline or multi-line (|)
+                match = re.search(r'content:\s*\|?\s*$', stripped)
+                if match:
+                    # Multi-line content starting on next line
+                    in_content = True
+                    content_indent = current_indent
+                    content_lines = []
+                else:
+                    # Inline content
+                    match = re.search(r'content:\s*(.+)', stripped)
+                    if match:
+                        current_skill['content'] = match.group(1).strip().strip('"').strip("'")
+
+# Don't forget the last skill
+if current_skill and current_skill.get('name'):
+    skills.append(current_skill)
+
+print(json.dumps(skills, indent=2))
+PYTHON_SCRIPT
+
+        if [ $? -eq 0 ] && [ -s "${output_file}" ]; then
+            return 0
+        fi
+    fi
+
+    echo "[]" > "${output_file}"
+    return 1
+}
+
+# Create a SKILL.md file from skill definition
+# Creates the skill in the appropriate Goose skills directory
+create_skill_file() {
+    local skills_dir=$1
+    local skill_name=$2
+    local skill_description=$3
+    local skill_content=$4
+    
+    local skill_dir="${skills_dir}/${skill_name}"
+    local skill_file="${skill_dir}/SKILL.md"
+    
+    mkdir -p "${skill_dir}"
+    
+    # Create SKILL.md with frontmatter
+    cat > "${skill_file}" <<EOF
+---
+name: ${skill_name}
+description: ${skill_description:-Skill ${skill_name}}
+---
+
+${skill_content}
+EOF
+
+    echo "       Created skill: ${skill_name}"
+    return 0
+}
+
+# Clone a git-based skill repository
+clone_skill_repo() {
+    local source=$1
+    local branch=$2
+    local target_dir=$3
+    
+    if [ -z "${source}" ] || [ -z "${target_dir}" ]; then
+        echo "       ERROR: Missing source or target directory for skill clone" >&2
+        return 1
+    fi
+    
+    if [ -z "${branch}" ]; then
+        branch="main"
+    fi
+    
+    if ! command -v git > /dev/null 2>&1; then
+        echo "       ERROR: git is not available for cloning skills" >&2
+        return 1
+    fi
+    
+    if [ -d "${target_dir}" ]; then
+        rm -rf "${target_dir}"
+    fi
+    
+    mkdir -p "$(dirname "${target_dir}")"
+    
+    echo "       Cloning skill from ${source} (branch: ${branch})..."
+    if git clone --depth 1 --branch "${branch}" "${source}" "${target_dir}" 2>/dev/null; then
+        echo "       Successfully cloned skill repository"
+        return 0
+    else
+        # Retry with default branch
+        if git clone --depth 1 "${source}" "${target_dir}" 2>/dev/null; then
+            echo "       Successfully cloned skill repository (default branch)"
+            return 0
+        fi
+    fi
+    
+    echo "       ERROR: Failed to clone skill from ${source}" >&2
+    return 1
+}
+
+# Copy file-based skill from app directory
+copy_local_skill() {
+    local build_dir=$1
+    local skill_path=$2
+    local skill_name=$3
+    local target_skills_dir=$4
+    
+    local source_dir="${build_dir}/${skill_path}"
+    local target_dir="${target_skills_dir}/${skill_name}"
+    
+    if [ ! -d "${source_dir}" ]; then
+        echo "       WARNING: Skill directory not found: ${skill_path}" >&2
+        return 1
+    fi
+    
+    if [ ! -f "${source_dir}/SKILL.md" ]; then
+        echo "       WARNING: SKILL.md not found in ${skill_path}" >&2
+        return 1
+    fi
+    
+    mkdir -p "${target_dir}"
+    cp -r "${source_dir}"/* "${target_dir}/"
+    
+    echo "       Copied local skill: ${skill_name} from ${skill_path}"
+    return 0
+}
+
+# Main skills configuration function
+# Installs skills from .goose-config.yml to ~/.config/goose/skills/
+configure_skills() {
+    local build_dir=$1
+    local deps_dir=$2
+    local index=$3
+    
+    echo "-----> Configuring Goose Skills"
+    
+    # Determine config file location
+    local config_file="${build_dir}/.goose-config.yml"
+    if [ ! -f "${config_file}" ]; then
+        config_file="${build_dir}/.goose-config.yaml"
+    fi
+    
+    if [ ! -f "${config_file}" ]; then
+        echo "       No configuration file found, skipping skills configuration"
+        return 0
+    fi
+    
+    # Parse skills from config
+    local skills_json_file="${build_dir}/.goose-skills-temp.json"
+    if ! parse_skills "${config_file}" "${skills_json_file}"; then
+        echo "       No skills configured"
+        rm -f "${skills_json_file}"
+        return 0
+    fi
+    
+    # Count skills
+    local skill_count=$(python3 -c "import json; data=json.load(open('${skills_json_file}')); print(len(data))" 2>/dev/null || echo "0")
+    if [ "${skill_count}" -eq 0 ]; then
+        echo "       No skills configured"
+        rm -f "${skills_json_file}"
+        return 0
+    fi
+    
+    echo "       Found ${skill_count} skill(s) to configure"
+    
+    # Create skills directory in Goose config location
+    # Goose looks for skills in: ~/.config/goose/skills/ (project-level: .goose/skills/)
+    local skills_target_dir="${build_dir}/.config/goose/skills"
+    mkdir -p "${skills_target_dir}"
+    
+    # Also create .goose/skills for project-level skills (higher priority)
+    local project_skills_dir="${build_dir}/.goose/skills"
+    mkdir -p "${project_skills_dir}"
+    
+    # Process each skill using Python
+    python3 - "${skills_json_file}" "${build_dir}" "${skills_target_dir}" "${project_skills_dir}" "${deps_dir}/${index}" <<'PYTHON_SCRIPT'
+import sys
+import json
+import os
+import subprocess
+
+if len(sys.argv) < 6:
+    sys.exit(1)
+
+skills_json_file = sys.argv[1]
+build_dir = sys.argv[2]
+skills_target_dir = sys.argv[3]
+project_skills_dir = sys.argv[4]
+deps_dir = sys.argv[5]
+
+try:
+    with open(skills_json_file, 'r') as f:
+        skills = json.load(f)
+except Exception as e:
+    print(f"       ERROR: Failed to load skills JSON: {e}", file=sys.stderr)
+    sys.exit(1)
+
+for skill in skills:
+    name = skill.get('name', 'unknown')
+    description = skill.get('description', f'Skill {name}')
+    content = skill.get('content')
+    path = skill.get('path')
+    source = skill.get('source')
+    branch = skill.get('branch', 'main')
+    
+    # Determine skill type and install accordingly
+    if content:
+        # Inline skill - create SKILL.md directly
+        skill_dir = os.path.join(project_skills_dir, name)
+        os.makedirs(skill_dir, exist_ok=True)
+        skill_file = os.path.join(skill_dir, 'SKILL.md')
+        
+        with open(skill_file, 'w') as f:
+            f.write(f"---\n")
+            f.write(f"name: {name}\n")
+            f.write(f"description: {description}\n")
+            f.write(f"---\n\n")
+            f.write(content)
+        
+        print(f"       Created inline skill: {name}")
+    
+    elif source:
+        # Git-based skill - clone repository
+        temp_clone_dir = os.path.join(deps_dir, 'skills-temp', name)
+        skill_subpath = path if path else ''
+        
+        # Clone the repository
+        try:
+            os.makedirs(os.path.dirname(temp_clone_dir), exist_ok=True)
+            result = subprocess.run(
+                ['git', 'clone', '--depth', '1', '--branch', branch, source, temp_clone_dir],
+                capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                # Try without branch
+                result = subprocess.run(
+                    ['git', 'clone', '--depth', '1', source, temp_clone_dir],
+                    capture_output=True, text=True
+                )
+                if result.returncode != 0:
+                    print(f"       WARNING: Failed to clone skill {name} from {source}", file=sys.stderr)
+                    continue
+            
+            # Copy skill from cloned repo to skills directory
+            source_path = os.path.join(temp_clone_dir, skill_subpath) if skill_subpath else temp_clone_dir
+            target_path = os.path.join(project_skills_dir, name)
+            
+            if os.path.exists(source_path):
+                os.makedirs(target_path, exist_ok=True)
+                # Copy SKILL.md and supporting files
+                import shutil
+                if os.path.isdir(source_path):
+                    for item in os.listdir(source_path):
+                        s = os.path.join(source_path, item)
+                        d = os.path.join(target_path, item)
+                        if os.path.isdir(s):
+                            shutil.copytree(s, d, dirs_exist_ok=True)
+                        else:
+                            shutil.copy2(s, d)
+                print(f"       Installed git skill: {name} from {source}")
+            else:
+                print(f"       WARNING: Skill path {skill_subpath} not found in {source}", file=sys.stderr)
+        except Exception as e:
+            print(f"       WARNING: Error cloning skill {name}: {e}", file=sys.stderr)
+    
+    elif path:
+        # File-based skill - copy from app directory
+        # Check multiple locations to support Spring Boot exploded JARs
+        source_path = None
+        actual_path = path
+        
+        # Try paths in order of priority:
+        # 1. Direct path (for non-Spring Boot apps or pre-exploded)
+        # 2. BOOT-INF/classes/ path (for Spring Boot exploded JARs)
+        candidate_paths = [
+            os.path.join(build_dir, path),
+            os.path.join(build_dir, 'BOOT-INF', 'classes', path),
+        ]
+        
+        for candidate in candidate_paths:
+            if os.path.exists(candidate):
+                source_path = candidate
+                break
+        
+        target_path = os.path.join(project_skills_dir, name)
+        
+        if source_path:
+            os.makedirs(target_path, exist_ok=True)
+            import shutil
+            if os.path.isdir(source_path):
+                for item in os.listdir(source_path):
+                    s = os.path.join(source_path, item)
+                    d = os.path.join(target_path, item)
+                    if os.path.isdir(s):
+                        shutil.copytree(s, d, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(s, d)
+            # Show the actual location found for debugging
+            if 'BOOT-INF' in source_path:
+                print(f"       Installed local skill: {name} from {path} (found in BOOT-INF/classes/)")
+            else:
+                print(f"       Installed local skill: {name} from {path}")
+        else:
+            print(f"       WARNING: Skill path not found: {path}", file=sys.stderr)
+            print(f"       Checked: {path}, BOOT-INF/classes/{path}", file=sys.stderr)
+
+print(f"       Skills configuration complete")
+PYTHON_SCRIPT
+
+    if [ $? -ne 0 ]; then
+        echo "       WARNING: Some skills may not have been configured correctly"
+    fi
+    
+    # Clean up temporary files
+    rm -f "${skills_json_file}"
+    rm -rf "${deps_dir}/${index}/skills-temp"
+    
+    # List installed skills
+    local skill_dirs=$(find "${project_skills_dir}" -name "SKILL.md" 2>/dev/null | wc -l | tr -d ' ')
+    echo "       Installed ${skill_dirs} skill(s) to .goose/skills/"
+    
+    return 0
+}
+

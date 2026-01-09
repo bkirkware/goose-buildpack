@@ -52,6 +52,41 @@ goose:
   #   env:
   #     POSTGRES_CONNECTION_STRING: ${DATABASE_URL}
 
+  # Skills Configuration
+  # Skills are reusable sets of instructions that teach Goose how to perform specific tasks.
+  # See: https://block.github.io/goose/docs/guides/context-engineering/using-skills
+  #
+  # Skills can be:
+  # 1. Inline - embedded directly in this config file
+  # 2. File-based - read from a directory in your app
+  # 3. Git-based - cloned from a repository during staging
+  #
+  # skills: []
+  #
+  # Example skills (uncomment to enable):
+  #
+  # Inline skill:
+  # skills:
+  #   - name: code-review
+  #     description: Comprehensive code review checklist
+  #     content: |
+  #       # Code Review Checklist
+  #       - [ ] Code does what the PR description claims
+  #       - [ ] Edge cases are handled
+  #       - [ ] Follows project style guide
+  #
+  # File-based skill (requires SKILL.md in the directory):
+  # skills:
+  #   - name: deployment
+  #     path: .goose/skills/deployment
+  #
+  # Git-based skill:
+  # skills:
+  #   - name: company-standards
+  #     source: https://github.com/org/goose-skills.git
+  #     branch: main
+  #     path: skills/company-standards
+
   # Plugin Marketplaces Configuration
   # Install plugins from git-based marketplace repositories
   # Note: Requires network access during Cloud Foundry staging for git clone

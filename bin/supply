@@ -104,6 +104,10 @@ configure_goose "${BUILD_DIR}"
 # Note: This requires network access during staging for git clone operations
 configure_plugin_marketplaces "${BUILD_DIR}" "${DEPS_DIR}" "${INDEX}"
 
+# Configure Skills (inline, file-based, and git-based skills)
+# Note: Git-based skills require network access during staging
+configure_skills "${BUILD_DIR}" "${DEPS_DIR}" "${INDEX}"
+
 # Verify installation
 echo "       Verifying installation..."
 verify_installation "${DEPS_INDEX_DIR}"

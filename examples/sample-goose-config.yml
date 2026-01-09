@@ -2,79 +2,119 @@
 # Sample .goose-config.yml
 # Place this file in your application root to enable Goose buildpack
 
-# LLM Provider configuration
-# Goose supports multiple providers - set credentials via environment variables
-provider: anthropic
-model: claude-sonnet-4-20250514
+goose:
+  # Enable Goose CLI installation
+  enabled: true
 
-# Goose CLI version (optional)
-# Use "stable" for the stable release, or specify a version like "v1.19.0"
-version: "stable"
+  # Goose CLI version
+  # Use "stable" for the stable release, or specify a version like "v1.19.0"
+  version: "stable"
 
-# Log level for Goose CLI (optional)
-logLevel: "info"          # debug, info, warn, error
+  # LLM Provider configuration
+  # Goose supports multiple providers - set credentials via environment variables
+  provider: anthropic
+  model: claude-sonnet-4-20250514
 
-# Builtin Extensions
-# Enable Goose's built-in extensions for additional capabilities
-#
-# Available builtin extensions:
-#
-#   developer       - File system access (read/write files), shell commands,
-#                     code editing with text_editor, screen capture, list windows,
-#                     code analysis, and image processing
-#
-#   memory          - Persistent memory across sessions. Store and retrieve
-#                     memories by category (local to project or global).
-#                     Useful for remembering user preferences, project context,
-#                     and learned information.
-#
-#   computercontroller - Desktop automation and control. Web scraping, running
-#                        automation scripts (shell, batch, ruby, powershell),
-#                        caching files, reading PDFs/DOCX/XLSX documents.
-#
-#   autovisualiser  - Data visualization tools. Generate charts (bar, line, pie,
-#                     radar, donut), maps, treemaps, chord diagrams, sankey
-#                     diagrams, and mermaid diagrams from data.
-#
-#   tutorial        - Interactive tutorials for learning Goose. Guides users
-#                     through building MCP extensions, creating games, etc.
-#
+  # Log level for Goose CLI
+  logLevel: "info"          # debug, info, warn, error
+
+  # MCP (Model Context Protocol) Servers
+  # Configure MCP servers to extend Goose capabilities
+  mcpServers: []
+
+  # Example MCP server configurations:
+  #
+  # Local stdio MCP servers:
+  # mcpServers:
+  #   - name: filesystem
+  #     type: stdio
+  #     command: npx
+  #     args:
+  #       - "-y"
+  #       - "@modelcontextprotocol/server-filesystem"
+  #     env:
+  #       ALLOWED_DIRECTORIES: "/home/vcap/app,/tmp"
+  #
+  #   - name: github
+  #     type: stdio
+  #     command: npx
+  #     args:
+  #       - "-y"
+  #       - "@modelcontextprotocol/server-github"
+  #     env:
+  #       GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+  #
+  # Remote SSE MCP servers:
+  #   - name: custom-server
+  #     type: streamable_http
+  #     url: "https://mcp-server.example.com/mcp"
+
+  # Builtin Extensions
+  # Enable Goose's built-in extensions for additional capabilities
+  # Common builtin extensions:
+  #   - developer: File system access, shell commands, code editing
+  #   - memory: Persistent memory across sessions
+  #   - computercontroller: Desktop automation and screenshots
+  #
+  # Example: Enable the developer extension for filesystem and shell access
+  # extensions:
+  #   developer:
+  #     enabled: true
+  #   memory:
+  #     enabled: true
+
+  # Skills Configuration
+  # Skills are reusable sets of instructions that teach Goose how to perform specific tasks.
+  # They can be embedded inline or referenced from files/directories.
+  # See: https://block.github.io/goose/docs/guides/context-engineering/using-skills
+  #
+  # skills: []
+  #
+  # Example skills configurations:
+  #
+  # Inline skill (embedded directly in config):
+  # skills:
+  #   - name: code-review
+  #     description: Comprehensive code review checklist for pull requests
+  #     content: |
+  #       # Code Review Checklist
+  #       When reviewing code, check each of these areas:
+  #       ## Functionality
+  #       - [ ] Code does what the PR description claims
+  #       - [ ] Edge cases are handled
+  #       ## Code Quality
+  #       - [ ] Follows project style guide
+  #       - [ ] No hardcoded values that should be configurable
+  #
+  # File-based skill (reads SKILL.md from a directory):
+  # skills:
+  #   - name: deployment
+  #     path: .goose/skills/deployment
+  #
+  # Git-based skill (clones from repository):
+  # skills:
+  #   - name: company-standards
+  #     source: https://github.com/org/goose-skills.git
+  #     branch: main
+  #     path: skills/company-standards
+
+# Active configuration example:
+# Uncomment to enable the developer extension
 extensions:
   developer:
     enabled: true
-  # memory:
-  #   enabled: true
-  # computercontroller:
-  #   enabled: true
-  # autovisualiser:
-  #   enabled: true
-  # tutorial:
-  #   enabled: true
 
-# MCP (Model Context Protocol) Servers
-# Configure remote MCP servers to extend Goose capabilities
-# Note: Only streamable_http transport is supported (SSE is deprecated)
-mcpServers: []
-
-# Example MCP server configurations:
-#
-# Remote Streaming HTTP MCP servers:
-# mcpServers:
-#   - name: my-mcp-server
-#     type: streamable_http
-#     url: "https://mcp-server.example.com/mcp"
-#
-#   - name: cloud-foundry
-#     type: streamable_http
-#     url: "https://cloud-foundry-mcp-server.example.com/mcp"
-#
-# Local stdio MCP servers (for development/testing):
-# mcpServers:
-#   - name: filesystem
-#     type: stdio
-#     command: npx
-#     args:
-#       - "-y"
-#       - "@modelcontextprotocol/server-filesystem"
-#     env:
-#       ALLOWED_DIRECTORIES: "/home/vcap/app,/tmp"
+# Example: Enable a simple inline skill for production deployment
+# skills:
+#   - name: production-deploy
+#     description: Safe deployment procedure for production environment
+#     content: |
+#       # Production Deployment
+#       ## Pre-deployment
+#       1. Ensure all tests pass
+#       2. Get approval from at least 2 reviewers
+#       3. Notify #deployments channel
+#       ## Deploy
+#       1. Create release branch from main
+#       2. Run ./gradlew build
+#       3. Deploy to staging, verify, then production
