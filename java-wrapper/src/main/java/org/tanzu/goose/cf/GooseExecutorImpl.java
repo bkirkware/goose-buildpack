@@ -520,11 +520,77 @@ public class GooseExecutorImpl implements GooseExecutor {
                     new InputStreamReader(process.getInputStream())
             );
 
-            // Return stream with proper cleanup handlers, filtering out banner lines
+                    // Return stream with proper cleanup handlers, filtering out banner lines
+                    return reader.lines()
+                            .filter(line -> !isGooseBannerLine(line))
+                            .onClose(() -> {
+                                logger.debug("Session stream closed, cleaning up resources");
+                                handle.close();
+                                try {
+                                    reader.close();
+                                } catch (IOException e) {
+                                    logger.warn("Error closing reader", e);
+                                }
+                            });
+
+        } catch (IOException e) {
+            logger.error("Failed to start streaming session execution", e);
+            throw new GooseExecutionException("Failed to start Goose streaming session", e);
+        }
+    }
+
+    // ==================== Streaming JSON Support ====================
+
+    @Override
+    public Stream<String> executeInSessionStreamingJson(String sessionName, String prompt, boolean resume) {
+        return executeInSessionStreamingJson(sessionName, prompt, resume, GooseOptions.defaults());
+    }
+
+    @Override
+    public Stream<String> executeInSessionStreamingJson(String sessionName, String prompt, boolean resume, GooseOptions options) {
+        validateSessionName(sessionName);
+        validatePrompt(prompt);
+        Objects.requireNonNull(options, "Options cannot be null");
+
+        logger.debug("Starting streaming JSON session '{}', resume={}, prompt length: {}", 
+            sessionName, resume, prompt.length());
+
+        List<String> command = buildSessionCommandWithStreamJson(sessionName, prompt, resume, options);
+        ProcessBuilder pb = new ProcessBuilder(command);
+
+        // Set working directory if specified
+        if (options.workingDirectory() != null) {
+            pb.directory(options.workingDirectory().toFile());
+        }
+
+        // Add environment variables to subprocess
+        Map<String, String> env = pb.environment();
+        env.putAll(baseEnvironment);
+        env.putAll(options.additionalEnv());
+
+        // CRITICAL: Redirect stderr to stdout to prevent buffer deadlock
+        pb.redirectErrorStream(true);
+
+        try {
+            Process process = pb.start();
+
+            // CRITICAL: Close stdin immediately so CLI doesn't wait for input
+            process.getOutputStream().close();
+
+            // Create streaming handle for resource management
+            StreamingProcessHandle handle = new StreamingProcessHandle(process, options.timeout());
+
+            // Create stream that reads lines as they arrive
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream())
+            );
+
+            // Return stream with proper cleanup handlers
+            // Filter to only include JSON lines (start with '{')
             return reader.lines()
-                    .filter(line -> !isGooseBannerLine(line))
+                    .filter(line -> line.startsWith("{"))
                     .onClose(() -> {
-                        logger.debug("Session stream closed, cleaning up resources");
+                        logger.debug("Streaming JSON session closed, cleaning up resources");
                         handle.close();
                         try {
                             reader.close();
@@ -534,9 +600,79 @@ public class GooseExecutorImpl implements GooseExecutor {
                     });
 
         } catch (IOException e) {
-            logger.error("Failed to start streaming session execution", e);
-            throw new GooseExecutionException("Failed to start Goose streaming session", e);
+            logger.error("Failed to start streaming JSON session execution", e);
+            throw new GooseExecutionException("Failed to start Goose streaming JSON session", e);
         }
+    }
+
+    /**
+     * Build the command line arguments for a named Goose session with streaming JSON output.
+     * <p>
+     * Uses: goose run -n "session-name" [-r] --provider X --model Y -t "prompt" --output-format stream-json --max-turns N
+     * </p>
+     */
+    private List<String> buildSessionCommandWithStreamJson(String sessionName, String prompt, boolean resume, GooseOptions options) {
+        logger.info("Building streaming JSON session command: session='{}', resume={}, promptLength={}", 
+            sessionName, resume, prompt.length());
+        
+        List<String> command = new ArrayList<>();
+        command.add(goosePath);
+        command.add("run");
+        
+        // Add session name
+        command.add("-n");
+        command.add(sessionName);
+        
+        // Add resume flag if continuing an existing session
+        if (resume) {
+            command.add("-r");
+            logger.info("Session '{}': Adding resume flag (-r)", sessionName);
+        } else {
+            logger.info("Session '{}': New session (no resume flag)", sessionName);
+        }
+        
+        // Resolve provider: options > GOOSE_PROVIDER env var
+        String provider = options.provider();
+        if (provider == null || provider.isEmpty()) {
+            provider = System.getenv("GOOSE_PROVIDER");
+        }
+        if (provider != null && !provider.isEmpty()) {
+            command.add("--provider");
+            command.add(provider);
+            logger.debug("Session '{}': Using provider '{}'", sessionName, provider);
+        }
+        
+        // Resolve model: options > GOOSE_MODEL env var
+        String model = options.model();
+        if (model == null || model.isEmpty()) {
+            model = System.getenv("GOOSE_MODEL");
+        }
+        if (model != null && !model.isEmpty()) {
+            command.add("--model");
+            command.add(model);
+            logger.debug("Session '{}': Using model '{}'", sessionName, model);
+        }
+        
+        // Add the prompt using -t flag
+        command.add("-t");
+        command.add(prompt);
+
+        // CRITICAL: Enable streaming JSON output for token-level streaming
+        command.add("--output-format");
+        command.add("stream-json");
+
+        // Add max-turns to prevent runaway sessions
+        command.add("--max-turns");
+        command.add(String.valueOf(options.maxTurns()));
+
+        // Log the full command (with prompt truncated for readability)
+        String promptPreview = prompt.length() > 50 ? prompt.substring(0, 50) + "..." : prompt;
+        logger.info("Session '{}': Streaming JSON command: {} (prompt: '{}')", 
+            sessionName, 
+            String.join(" ", command.subList(0, Math.min(command.size(), command.size() - 4))),
+            promptPreview);
+
+        return command;
     }
 
     // ==================== Private Utility Methods ====================

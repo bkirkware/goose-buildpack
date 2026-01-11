@@ -44,12 +44,6 @@
     </dependencyManagement>
 
     <dependencies>
-        <!-- Logging (version managed by Spring Boot) -->
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-api</artifactId>
-        </dependency>
-
         <!-- Spring Boot (Optional, for auto-configuration) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -85,12 +79,6 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>ch.qos.logback</groupId>
-            <artifactId>logback-classic</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
