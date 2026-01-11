@@ -220,5 +220,44 @@ public interface GooseExecutor {
      * @throws GooseExecutionException if command execution fails to start
      */
     Stream<String> executeInSessionStreaming(String sessionName, String prompt, boolean resume, GooseOptions options);
+
+    // ==================== Streaming JSON Support ====================
+
+    /**
+     * Execute a Goose command within a named session and return output as a stream of JSON events.
+     * <p>
+     * This method uses {@code --output-format stream-json} to receive token-level streaming events.
+     * Each line emitted is a JSON object with one of the following formats:
+     * </p>
+     * <ul>
+     *   <li><b>Message event:</b> {@code {"type":"message","message":{"content":[{"type":"text","text":"token"}],...}}}</li>
+     *   <li><b>Complete event:</b> {@code {"type":"complete","total_tokens":1234}}</li>
+     * </ul>
+     * <p>
+     * This enables true real-time streaming where individual tokens are emitted as they arrive
+     * from the LLM, rather than waiting for complete lines or the entire response.
+     * </p>
+     *
+     * @param sessionName the name for this session
+     * @param prompt the prompt to send to Goose
+     * @param resume if true, resumes an existing session; if false, starts new
+     * @return a Stream of JSON event lines that must be closed when done
+     * @throws IllegalArgumentException if sessionName or prompt is null or empty
+     * @throws GooseExecutionException if command execution fails to start
+     */
+    Stream<String> executeInSessionStreamingJson(String sessionName, String prompt, boolean resume);
+
+    /**
+     * Execute a Goose command within a named session and return output as a stream of JSON events with options.
+     *
+     * @param sessionName the name for this session
+     * @param prompt the prompt to send to Goose
+     * @param resume if true, resumes an existing session; if false, starts new
+     * @param options execution options (timeout, model, etc.)
+     * @return a Stream of JSON event lines that must be closed when done
+     * @throws IllegalArgumentException if sessionName or prompt is null or empty
+     * @throws GooseExecutionException if command execution fails to start
+     */
+    Stream<String> executeInSessionStreamingJson(String sessionName, String prompt, boolean resume, GooseOptions options);
 }
 
