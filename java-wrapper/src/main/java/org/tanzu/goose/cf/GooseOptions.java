@@ -17,6 +17,17 @@ import java.util.Map;
  *     .maxTurns(50)
  *     .build();
  * }</pre>
+ * <p>
+ * For OpenAI-compatible endpoints (e.g., GenAI services), use:
+ * </p>
+ * <pre>{@code
+ * GooseOptions options = GooseOptions.builder()
+ *     .provider("openai")
+ *     .model("gpt-4")
+ *     .apiKey("sk-...")
+ *     .baseUrl("https://my-genai-service.example.com/openai")
+ *     .build();
+ * }</pre>
  *
  * @author Goose Buildpack Team
  * @since 1.0.0
@@ -25,6 +36,8 @@ public record GooseOptions(
         Duration timeout,
         String model,
         String provider,
+        String apiKey,
+        String baseUrl,
         int maxTurns,
         Path workingDirectory,
         Map<String, String> additionalEnv
@@ -50,6 +63,8 @@ public record GooseOptions(
                 DEFAULT_TIMEOUT,
                 null,
                 null,
+                null,
+                null,
                 DEFAULT_MAX_TURNS,
                 null,
                 Map.of()
@@ -72,6 +87,8 @@ public record GooseOptions(
         private Duration timeout = DEFAULT_TIMEOUT;
         private String model;
         private String provider;
+        private String apiKey;
+        private String baseUrl;
         private int maxTurns = DEFAULT_MAX_TURNS;
         private Path workingDirectory;
         private final Map<String, String> additionalEnv = new HashMap<>();
@@ -112,6 +129,41 @@ public record GooseOptions(
          */
         public Builder provider(String provider) {
             this.provider = provider;
+            return this;
+        }
+
+        /**
+         * Set the API key for OpenAI-compatible endpoints.
+         * <p>
+         * When set along with {@link #baseUrl(String)}, this enables using custom
+         * OpenAI-compatible endpoints such as GenAI services. The API key will be
+         * passed to the Goose CLI via the OPENAI_API_KEY environment variable.
+         * </p>
+         *
+         * @param apiKey the API key for authentication
+         * @return this builder
+         */
+        public Builder apiKey(String apiKey) {
+            this.apiKey = apiKey;
+            return this;
+        }
+
+        /**
+         * Set the base URL for OpenAI-compatible endpoints.
+         * <p>
+         * When set along with {@link #apiKey(String)}, this enables using custom
+         * OpenAI-compatible endpoints such as GenAI services. The base URL will be
+         * passed to the Goose CLI via the OPENAI_HOST environment variable.
+         * </p>
+         * <p>
+         * Example: "https://my-genai-service.example.com/openai"
+         * </p>
+         *
+         * @param baseUrl the base URL of the OpenAI-compatible API
+         * @return this builder
+         */
+        public Builder baseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
             return this;
         }
 
@@ -176,6 +228,8 @@ public record GooseOptions(
                     timeout,
                     model,
                     provider,
+                    apiKey,
+                    baseUrl,
                     maxTurns,
                     workingDirectory,
                     Map.copyOf(additionalEnv)
