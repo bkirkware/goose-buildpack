@@ -7,7 +7,7 @@
 
     <groupId>org.tanzu.goose</groupId>
     <artifactId>goose-cf-wrapper</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <packaging>jar</packaging>
 
     <name>Goose Cloud Foundry Wrapper</name>
@@ -61,6 +61,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-autoconfigure</artifactId>
             <optional>true</optional>
+        </dependency>
+
+        <!-- YAML parsing for configuration -->
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
         </dependency>
 
         <!-- Test Dependencies (versions managed by Spring Boot) -->

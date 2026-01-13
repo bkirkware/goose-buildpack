@@ -156,6 +156,18 @@ public interface GooseExecutor {
      */
     String getVersion();
 
+    /**
+     * Get the Goose configuration including skills and MCP servers.
+     * <p>
+     * Reads and parses the configuration from ~/.config/goose/config.yaml.
+     * The configuration is cached after the first read since it doesn't
+     * change at runtime.
+     * </p>
+     *
+     * @return the parsed configuration, or an empty configuration if not available
+     */
+    GooseConfiguration getConfiguration();
+
     // ==================== Session Management ====================
 
     /**
