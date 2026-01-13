@@ -3,8 +3,6 @@ package org.tanzu.goose.cf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.yaml.snakeyaml.Yaml;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -13,7 +11,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 /**
@@ -24,9 +21,6 @@ import java.util.stream.Stream;
  * </p>
  *
  * <h2>Critical Implementation Details</h2>
- * <p>
- * This implementation follows patterns to avoid common ProcessBuilder pitfalls:
- * </p>
  * <ul>
  *   <li>Always closes stdin immediately to prevent CLI from waiting for input</li>
  *   <li>Redirects stderr to stdout to prevent buffer deadlock</li>
@@ -39,68 +33,385 @@ import java.util.stream.Stream;
  * <p>
  * When using OpenAI-compatible endpoints (GenAI services), this executor automatically
  * routes requests through a local {@link SseNormalizingProxy} to fix SSE format
- * incompatibilities. Some GenAI proxies return {@code data:{...}} without a space,
- * while Goose CLI expects {@code data: {...}} with a space. The proxy normalizes
- * the format transparently.
+ * incompatibilities.
  * </p>
- *
- * <h2>Environment Variables</h2>
- * <p>Required environment variables:</p>
- * <ul>
- *   <li><code>GOOSE_CLI_PATH</code> - Path to the Goose CLI executable</li>
- *   <li>One of: <code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, 
- *       <code>GOOGLE_API_KEY</code>, etc.</li>
- *   <li><code>HOME</code> - Home directory (for Goose configuration)</li>
- * </ul>
  *
  * @author Goose Buildpack Team
  * @since 1.0.0
+ * @see GooseCommandBuilder
+ * @see GooseEnvironmentManager
+ * @see GooseConfigurationParser
  */
 public class GooseExecutorImpl implements GooseExecutor, AutoCloseable {
 
     private static final Logger logger = LoggerFactory.getLogger(GooseExecutorImpl.class);
 
-    // Shared executor service for timeout management
-    private static final ScheduledExecutorService timeoutExecutor =
-            Executors.newScheduledThreadPool(2, r -> {
-                Thread t = new Thread(r, "goose-timeout");
-                t.setDaemon(true);
-                return t;
-            });
-
     private final String goosePath;
-    private final Map<String, String> baseEnvironment;
+    private final GooseCommandBuilder commandBuilder;
+    private final GooseEnvironmentManager environmentManager;
+    private final GooseConfigurationParser configurationParser;
     
-    // SSE normalizing proxy for GenAI compatibility (lazy-initialized)
-    private volatile SseNormalizingProxy sseProxy;
-    private final Object proxyLock = new Object();
-    
-    // Cached configuration (lazy-loaded, immutable at runtime)
+    // Cached configuration (lazy-loaded)
     private volatile GooseConfiguration cachedConfiguration;
 
     /**
      * Constructs a new executor using environment variables.
-     * <p>
-     * Requires the following environment variables to be set:
-     * </p>
-     * <ul>
-     *   <li>GOOSE_CLI_PATH</li>
-     *   <li>At least one LLM provider API key</li>
-     * </ul>
      *
-     * @throws IllegalStateException if required environment variables are not set
+     * @throws IllegalStateException if GOOSE_CLI_PATH is not set
      */
     public GooseExecutorImpl() {
         this.goosePath = getRequiredEnv("GOOSE_CLI_PATH");
-        this.baseEnvironment = buildBaseEnvironment();
+        this.commandBuilder = new GooseCommandBuilder(goosePath);
+        this.environmentManager = new GooseEnvironmentManager();
+        this.configurationParser = new GooseConfigurationParser();
         
-        // Log Goose configuration status at startup
         logGooseConfiguration();
     }
-    
+
+    /**
+     * Constructs a new executor with explicit configuration.
+     *
+     * @param goosePath path to the Goose CLI executable
+     * @param apiKeys map of provider API keys
+     */
+    public GooseExecutorImpl(String goosePath, Map<String, String> apiKeys) {
+        if (goosePath == null || goosePath.isEmpty()) {
+            throw new IllegalArgumentException("Goose CLI path cannot be null or empty");
+        }
+        if (apiKeys == null || apiKeys.isEmpty()) {
+            throw new IllegalArgumentException("At least one API key must be provided");
+        }
+
+        this.goosePath = goosePath;
+        this.commandBuilder = new GooseCommandBuilder(goosePath);
+        this.environmentManager = new GooseEnvironmentManager(apiKeys);
+        this.configurationParser = new GooseConfigurationParser();
+    }
+
+    // ==================== Single-Shot Execution ====================
+
+    @Override
+    public String execute(String prompt) {
+        return execute(prompt, GooseOptions.defaults());
+    }
+
+    @Override
+    public String execute(String prompt, GooseOptions options) {
+        validatePrompt(prompt);
+        Objects.requireNonNull(options, "Options cannot be null");
+
+        logger.debug("Executing Goose with prompt length: {}", prompt.length());
+
+        List<String> command = commandBuilder.buildSingleShotCommand(prompt, options);
+        return executeProcess(command, options, "Goose");
+    }
+
+    @Override
+    public CompletableFuture<String> executeAsync(String prompt) {
+        return executeAsync(prompt, GooseOptions.defaults());
+    }
+
+    @Override
+    public CompletableFuture<String> executeAsync(String prompt, GooseOptions options) {
+        validatePrompt(prompt);
+        Objects.requireNonNull(options, "Options cannot be null");
+
+        return CompletableFuture.supplyAsync(() -> execute(prompt, options));
+    }
+
+    @Override
+    public Stream<String> executeStreaming(String prompt) {
+        return executeStreaming(prompt, GooseOptions.defaults());
+    }
+
+    @Override
+    public Stream<String> executeStreaming(String prompt, GooseOptions options) {
+        validatePrompt(prompt);
+        Objects.requireNonNull(options, "Options cannot be null");
+
+        logger.debug("Starting streaming execution with prompt length: {}", prompt.length());
+
+        List<String> command = commandBuilder.buildSingleShotCommand(prompt, options);
+        return executeStreamingProcess(command, options);
+    }
+
+    // ==================== Session Management ====================
+
+    @Override
+    public String executeInSession(String sessionName, String prompt, boolean resume) {
+        return executeInSession(sessionName, prompt, resume, GooseOptions.defaults());
+    }
+
+    @Override
+    public String executeInSession(String sessionName, String prompt, boolean resume, GooseOptions options) {
+        validateSessionName(sessionName);
+        validatePrompt(prompt);
+        Objects.requireNonNull(options, "Options cannot be null");
+
+        logger.debug("Executing Goose in session '{}', resume={}, prompt length: {}", 
+            sessionName, resume, prompt.length());
+
+        List<String> command = commandBuilder.buildSessionCommand(sessionName, prompt, resume, options);
+        String result = executeProcess(command, options, "Goose session");
+        return GooseOutputFilter.filterBanner(result);
+    }
+
+    @Override
+    public Stream<String> executeInSessionStreaming(String sessionName, String prompt, boolean resume) {
+        return executeInSessionStreaming(sessionName, prompt, resume, GooseOptions.defaults());
+    }
+
+    @Override
+    public Stream<String> executeInSessionStreaming(String sessionName, String prompt, boolean resume, GooseOptions options) {
+        validateSessionName(sessionName);
+        validatePrompt(prompt);
+        Objects.requireNonNull(options, "Options cannot be null");
+
+        logger.debug("Starting streaming session '{}', resume={}, prompt length: {}", 
+            sessionName, resume, prompt.length());
+
+        List<String> command = commandBuilder.buildSessionCommand(sessionName, prompt, resume, options);
+        return executeStreamingProcess(command, options)
+                .filter(line -> !GooseOutputFilter.isBannerLine(line));
+    }
+
+    // ==================== Streaming JSON Support ====================
+
+    @Override
+    public Stream<String> executeInSessionStreamingJson(String sessionName, String prompt, boolean resume) {
+        return executeInSessionStreamingJson(sessionName, prompt, resume, GooseOptions.defaults());
+    }
+
+    @Override
+    public Stream<String> executeInSessionStreamingJson(String sessionName, String prompt, boolean resume, GooseOptions options) {
+        validateSessionName(sessionName);
+        validatePrompt(prompt);
+        Objects.requireNonNull(options, "Options cannot be null");
+
+        logger.debug("Starting streaming JSON session '{}', resume={}, prompt length: {}", 
+            sessionName, resume, prompt.length());
+
+        List<String> command = commandBuilder.buildStreamingJsonCommand(sessionName, prompt, resume, options);
+        ProcessBuilder pb = createProcessBuilder(command, options);
+        
+        // Enable debug mode
+        Map<String, String> env = pb.environment();
+        env.put("GOOSE_DEBUG", "true");
+        env.put("RUST_LOG", "goose=debug,goose_cli=debug");
+        
+        logEnvironmentDetails(sessionName, env);
+
+        try {
+            Process process = pb.start();
+            process.getOutputStream().close();
+
+            StreamingProcessHandle handle = new StreamingProcessHandle(process, options.timeout());
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+
+            return reader.lines()
+                    .peek(line -> logger.debug("Goose raw output: {}", line))
+                    .filter(line -> line.startsWith("{"))
+                    .onClose(() -> {
+                        logger.info("Streaming JSON session closed, cleaning up resources");
+                        handle.close();
+                        closeQuietly(reader);
+                        if (!process.isAlive()) {
+                            logger.info("Goose process exited with code: {}", process.exitValue());
+                        }
+                    });
+
+        } catch (IOException e) {
+            logger.error("Failed to start streaming JSON session execution", e);
+            throw new GooseExecutionException("Failed to start Goose streaming JSON session", e);
+        }
+    }
+
+    // ==================== Status Methods ====================
+
+    @Override
+    public boolean isAvailable() {
+        try {
+            if (goosePath == null || goosePath.isEmpty()) {
+                logger.warn("GOOSE_CLI_PATH not set");
+                return false;
+            }
+
+            Path cliPath = Paths.get(goosePath);
+            if (!Files.exists(cliPath)) {
+                logger.warn("Goose CLI executable not found at: {}", goosePath);
+                return false;
+            }
+
+            if (!environmentManager.hasProviderCredentials()) {
+                logger.warn("No LLM provider credentials found");
+                return false;
+            }
+
+            logger.debug("Goose CLI is available");
+            return true;
+
+        } catch (Exception e) {
+            logger.error("Error checking Goose availability", e);
+            return false;
+        }
+    }
+
+    @Override
+    public String getVersion() {
+        try {
+            ProcessBuilder pb = new ProcessBuilder(commandBuilder.buildVersionCommand());
+            pb.redirectErrorStream(true);
+
+            Process process = pb.start();
+            process.getOutputStream().close();
+
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line);
+                }
+            }
+
+            boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return null;
+            }
+
+            if (process.exitValue() == 0) {
+                return output.toString().trim();
+            }
+
+            return null;
+
+        } catch (Exception e) {
+            logger.error("Failed to get Goose version", e);
+            return null;
+        }
+    }
+
+    @Override
+    public GooseConfiguration getConfiguration() {
+        if (cachedConfiguration != null) {
+            return cachedConfiguration;
+        }
+        
+        synchronized (this) {
+            if (cachedConfiguration != null) {
+                return cachedConfiguration;
+            }
+            
+            cachedConfiguration = configurationParser.parse();
+            return cachedConfiguration;
+        }
+    }
+
+    @Override
+    public void close() {
+        environmentManager.close();
+    }
+
+    // ==================== Private Helper Methods ====================
+
+    /**
+     * Executes a process and returns the output as a string.
+     */
+    private String executeProcess(List<String> command, GooseOptions options, String processName) {
+        ProcessBuilder pb = createProcessBuilder(command, options);
+
+        try {
+            Process process = pb.start();
+            process.getOutputStream().close();
+
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                    logger.debug("{} output: {}", processName, line);
+                }
+            }
+
+            boolean finished = process.waitFor(options.timeout().toMillis(), TimeUnit.MILLISECONDS);
+
+            if (!finished) {
+                logger.error("{} command timed out after {}", processName, options.timeout());
+                process.destroyForcibly();
+                throw new TimeoutException(processName + " execution timed out after " + options.timeout());
+            }
+
+            int exitCode = process.exitValue();
+            if (exitCode != 0) {
+                String outputStr = output.toString();
+                logger.error("{} failed with exit code: {}, output: {}", processName, exitCode, outputStr);
+                throw new GooseExecutionException(
+                        processName + " failed with exit code: " + exitCode,
+                        exitCode,
+                        outputStr
+                );
+            }
+
+            String result = output.toString();
+            logger.info("{} executed successfully, output length: {}", processName, result.length());
+            return result;
+
+        } catch (IOException e) {
+            logger.error("Failed to execute {}", processName, e);
+            throw new GooseExecutionException("Failed to execute " + processName, e);
+        } catch (InterruptedException e) {
+            logger.error("{} execution interrupted", processName, e);
+            Thread.currentThread().interrupt();
+            throw new GooseExecutionException(processName + " execution interrupted", e);
+        } catch (TimeoutException e) {
+            throw new GooseExecutionException(processName + " execution timed out", e);
+        }
+    }
+
+    /**
+     * Executes a process and returns output as a stream.
+     */
+    private Stream<String> executeStreamingProcess(List<String> command, GooseOptions options) {
+        ProcessBuilder pb = createProcessBuilder(command, options);
+
+        try {
+            Process process = pb.start();
+            process.getOutputStream().close();
+
+            StreamingProcessHandle handle = new StreamingProcessHandle(process, options.timeout());
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+
+            return reader.lines()
+                    .onClose(() -> {
+                        logger.debug("Stream closed, cleaning up resources");
+                        handle.close();
+                        closeQuietly(reader);
+                    });
+
+        } catch (IOException e) {
+            logger.error("Failed to start streaming execution", e);
+            throw new GooseExecutionException("Failed to start Goose streaming", e);
+        }
+    }
+
+    /**
+     * Creates a configured ProcessBuilder.
+     */
+    private ProcessBuilder createProcessBuilder(List<String> command, GooseOptions options) {
+        ProcessBuilder pb = new ProcessBuilder(command);
+
+        if (options.workingDirectory() != null) {
+            pb.directory(options.workingDirectory().toFile());
+        }
+
+        environmentManager.applyToProcessEnvironment(pb.environment(), options);
+        pb.redirectErrorStream(true);
+
+        return pb;
+    }
+
     /**
      * Log Goose configuration status for troubleshooting.
-     * This helps diagnose issues with config.yaml loading.
      */
     private void logGooseConfiguration() {
         String home = System.getenv("HOME");
@@ -142,7 +453,6 @@ public class GooseExecutorImpl implements GooseExecutor, AutoCloseable {
             } else {
                 logger.warn("  config.yaml NOT FOUND at: {}", configFile);
                 
-                // Check alternative locations
                 Path appConfigDir = Paths.get("/home/vcap/app/.config/goose");
                 if (Files.exists(appConfigDir)) {
                     logger.info("  Found config at /home/vcap/app/.config/goose/ (needs to be copied to HOME)");
@@ -164,770 +474,9 @@ public class GooseExecutorImpl implements GooseExecutor, AutoCloseable {
     }
 
     /**
-     * Constructs a new executor with explicit configuration.
-     *
-     * @param goosePath path to the Goose CLI executable
-     * @param apiKeys map of provider API keys (e.g., ANTHROPIC_API_KEY -> value)
-     * @throws IllegalArgumentException if goosePath is null or empty
+     * Log environment details for debugging.
      */
-    public GooseExecutorImpl(String goosePath, Map<String, String> apiKeys) {
-        if (goosePath == null || goosePath.isEmpty()) {
-            throw new IllegalArgumentException("Goose CLI path cannot be null or empty");
-        }
-        if (apiKeys == null || apiKeys.isEmpty()) {
-            throw new IllegalArgumentException("At least one API key must be provided");
-        }
-
-        this.goosePath = goosePath;
-        this.baseEnvironment = buildEnvironment(apiKeys);
-    }
-
-    @Override
-    public String execute(String prompt) {
-        return execute(prompt, GooseOptions.defaults());
-    }
-
-    @Override
-    public String execute(String prompt, GooseOptions options) {
-        validatePrompt(prompt);
-        Objects.requireNonNull(options, "Options cannot be null");
-
-        logger.debug("Executing Goose with prompt length: {}", prompt.length());
-
-        List<String> command = buildCommand(prompt, options);
-        ProcessBuilder pb = new ProcessBuilder(command);
-
-        // Set working directory if specified
-        if (options.workingDirectory() != null) {
-            pb.directory(options.workingDirectory().toFile());
-        }
-
-        // Add environment variables to subprocess
-        Map<String, String> env = pb.environment();
-        env.putAll(baseEnvironment);
-        env.putAll(options.additionalEnv());
-        applyOpenAiCompatibleEnv(env, options);
-
-        // CRITICAL: Redirect stderr to stdout to prevent buffer deadlock
-        pb.redirectErrorStream(true);
-
-        try {
-            Process process = pb.start();
-
-            // CRITICAL: Close stdin immediately so CLI doesn't wait for input
-            process.getOutputStream().close();
-
-            // Read output
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                    logger.debug("Goose output: {}", line);
-                }
-            }
-
-            // Wait for process to complete with timeout
-            boolean finished = process.waitFor(
-                    options.timeout().toMillis(),
-                    TimeUnit.MILLISECONDS
-            );
-
-            if (!finished) {
-                logger.error("Goose command timed out after {}", options.timeout());
-                process.destroyForcibly();
-                throw new TimeoutException("Goose execution timed out after " + options.timeout());
-            }
-
-            int exitCode = process.exitValue();
-            if (exitCode != 0) {
-                String outputStr = output.toString();
-                logger.error("Goose failed with exit code: {}, output: {}", exitCode, outputStr);
-                throw new GooseExecutionException(
-                        "Goose failed with exit code: " + exitCode,
-                        exitCode,
-                        outputStr
-                );
-            }
-
-            String result = output.toString();
-            logger.info("Goose executed successfully, output length: {}", result.length());
-            return result;
-
-        } catch (IOException e) {
-            logger.error("Failed to execute Goose", e);
-            throw new GooseExecutionException("Failed to execute Goose", e);
-        } catch (InterruptedException e) {
-            logger.error("Goose execution interrupted", e);
-            Thread.currentThread().interrupt();
-            throw new GooseExecutionException("Goose execution interrupted", e);
-        } catch (TimeoutException e) {
-            throw new GooseExecutionException("Goose execution timed out", e);
-        }
-    }
-
-    @Override
-    public CompletableFuture<String> executeAsync(String prompt) {
-        return executeAsync(prompt, GooseOptions.defaults());
-    }
-
-    @Override
-    public CompletableFuture<String> executeAsync(String prompt, GooseOptions options) {
-        validatePrompt(prompt);
-        Objects.requireNonNull(options, "Options cannot be null");
-
-        return CompletableFuture.supplyAsync(() -> execute(prompt, options));
-    }
-
-    @Override
-    public Stream<String> executeStreaming(String prompt) {
-        return executeStreaming(prompt, GooseOptions.defaults());
-    }
-
-    @Override
-    public Stream<String> executeStreaming(String prompt, GooseOptions options) {
-        validatePrompt(prompt);
-        Objects.requireNonNull(options, "Options cannot be null");
-
-        logger.debug("Starting streaming execution with prompt length: {}", prompt.length());
-
-        List<String> command = buildCommand(prompt, options);
-        ProcessBuilder pb = new ProcessBuilder(command);
-
-        // Set working directory if specified
-        if (options.workingDirectory() != null) {
-            pb.directory(options.workingDirectory().toFile());
-        }
-
-        // Add environment variables to subprocess
-        Map<String, String> env = pb.environment();
-        env.putAll(baseEnvironment);
-        env.putAll(options.additionalEnv());
-        applyOpenAiCompatibleEnv(env, options);
-
-        // CRITICAL: Redirect stderr to stdout to prevent buffer deadlock
-        pb.redirectErrorStream(true);
-
-        try {
-            Process process = pb.start();
-
-            // CRITICAL: Close stdin immediately so CLI doesn't wait for input
-            process.getOutputStream().close();
-
-            // Create streaming handle for resource management
-            StreamingProcessHandle handle = new StreamingProcessHandle(process, options.timeout());
-
-            // Create stream that reads lines as they arrive
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream())
-            );
-
-            // Return stream with proper cleanup handlers
-            return reader.lines()
-                    .onClose(() -> {
-                        logger.debug("Stream closed, cleaning up resources");
-                        handle.close();
-                        try {
-                            reader.close();
-                        } catch (IOException e) {
-                            logger.warn("Error closing reader", e);
-                        }
-                    });
-
-        } catch (IOException e) {
-            logger.error("Failed to start streaming execution", e);
-            throw new GooseExecutionException("Failed to start Goose streaming", e);
-        }
-    }
-
-    @Override
-    public boolean isAvailable() {
-        try {
-            // Check if CLI path environment variable is set
-            if (goosePath == null || goosePath.isEmpty()) {
-                logger.warn("GOOSE_CLI_PATH not set");
-                return false;
-            }
-
-            // Check if CLI executable exists
-            Path cliPath = Paths.get(goosePath);
-            if (!Files.exists(cliPath)) {
-                logger.warn("Goose CLI executable not found at: {}", goosePath);
-                return false;
-            }
-
-            // Check if at least one API key is set
-            if (!hasProviderCredentials()) {
-                logger.warn("No LLM provider credentials found");
-                return false;
-            }
-
-            logger.debug("Goose CLI is available");
-            return true;
-
-        } catch (Exception e) {
-            logger.error("Error checking Goose availability", e);
-            return false;
-        }
-    }
-
-    @Override
-    public String getVersion() {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(goosePath, "--version");
-            pb.redirectErrorStream(true);
-
-            Process process = pb.start();
-            process.getOutputStream().close();
-
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-
-            boolean finished = process.waitFor(10, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
-                return null;
-            }
-
-            if (process.exitValue() == 0) {
-                return output.toString().trim();
-            }
-
-            return null;
-
-        } catch (Exception e) {
-            logger.error("Failed to get Goose version", e);
-            return null;
-        }
-    }
-
-    @Override
-    public GooseConfiguration getConfiguration() {
-        // Return cached configuration if available
-        if (cachedConfiguration != null) {
-            return cachedConfiguration;
-        }
-        
-        synchronized (this) {
-            // Double-check after acquiring lock
-            if (cachedConfiguration != null) {
-                return cachedConfiguration;
-            }
-            
-            cachedConfiguration = parseConfiguration();
-            return cachedConfiguration;
-        }
-    }
-    
-    /**
-     * Parse the Goose configuration from config files.
-     * <p>
-     * Searches for configuration in the following order:
-     * 1. ~/.config/goose/config.yaml (Goose native format with extensions)
-     * 2. /home/vcap/app/.config/goose/config.yaml (CF buildpack location)
-     * 3. Classpath resource .goose-config.yml (original app config)
-     * </p>
-     */
-    private GooseConfiguration parseConfiguration() {
-        String home = System.getenv("HOME");
-        
-        // Try multiple config file locations
-        List<Path> configPaths = new ArrayList<>();
-        if (home != null && !home.isEmpty()) {
-            configPaths.add(Paths.get(home, ".config", "goose", "config.yaml"));
-        }
-        // CF buildpack copies config to /home/vcap/app/.config/goose/
-        configPaths.add(Paths.get("/home/vcap/app/.config/goose/config.yaml"));
-        
-        Path configFile = null;
-        for (Path path : configPaths) {
-            if (Files.exists(path)) {
-                configFile = path;
-                logger.info("Found Goose config file at: {}", path);
-                break;
-            }
-        }
-        
-        if (configFile == null) {
-            logger.info("No Goose config file found in any of: {}", configPaths);
-            return GooseConfiguration.empty();
-        }
-        
-        try {
-            String content = Files.readString(configFile);
-            Yaml yaml = new Yaml();
-            Map<String, Object> config = yaml.load(content);
-            
-            if (config == null) {
-                return GooseConfiguration.empty();
-            }
-            
-            String provider = getStringValue(config, "provider");
-            String model = getStringValue(config, "model");
-            
-            // Parse skills from config and from skills directory
-            List<SkillInfo> skills = parseSkills(config);
-            List<SkillInfo> installedSkills = parseInstalledSkills(configFile.getParent());
-            if (!installedSkills.isEmpty()) {
-                skills = new ArrayList<>(skills);
-                skills.addAll(installedSkills);
-            }
-            
-            // Parse MCP servers - check both 'mcpServers' and 'extensions' formats
-            List<McpServerInfo> mcpServers = parseMcpServers(config);
-            if (mcpServers.isEmpty()) {
-                // Try parsing from extensions (buildpack-transformed format)
-                mcpServers = parseMcpServersFromExtensions(config);
-            }
-            
-            logger.info("Parsed Goose configuration: provider={}, model={}, skills={}, mcpServers={}", 
-                provider, model, skills.size(), mcpServers.size());
-            
-            return new GooseConfiguration(provider, model, skills, mcpServers);
-            
-        } catch (IOException e) {
-            logger.error("Failed to read Goose configuration from: {}", configFile, e);
-            return GooseConfiguration.empty();
-        } catch (Exception e) {
-            logger.error("Failed to parse Goose configuration", e);
-            return GooseConfiguration.empty();
-        }
-    }
-    
-    /**
-     * Parse installed skills from the skills directory.
-     * Skills are installed to ~/.config/goose/skills/{skill-name}/SKILL.md
-     */
-    private List<SkillInfo> parseInstalledSkills(Path configDir) {
-        Path skillsDir = configDir.resolve("skills");
-        if (!Files.exists(skillsDir) || !Files.isDirectory(skillsDir)) {
-            return List.of();
-        }
-        
-        List<SkillInfo> skills = new ArrayList<>();
-        try {
-            Files.list(skillsDir)
-                .filter(Files::isDirectory)
-                .forEach(skillDir -> {
-                    String name = skillDir.getFileName().toString();
-                    Path skillFile = skillDir.resolve("SKILL.md");
-                    String description = null;
-                    String source = "file";
-                    
-                    if (Files.exists(skillFile)) {
-                        try {
-                            // Try to parse description from SKILL.md frontmatter
-                            String content = Files.readString(skillFile);
-                            description = parseSkillDescription(content);
-                        } catch (IOException e) {
-                            logger.debug("Could not read skill file: {}", skillFile);
-                        }
-                    }
-                    
-                    skills.add(new SkillInfo(name, description, source, skillDir.toString(), null, null));
-                });
-        } catch (IOException e) {
-            logger.warn("Error listing skills directory: {}", skillsDir, e);
-        }
-        
-        return skills;
-    }
-    
-    /**
-     * Parse description from SKILL.md YAML frontmatter.
-     */
-    private String parseSkillDescription(String content) {
-        if (!content.startsWith("---")) {
-            return null;
-        }
-        
-        int endIndex = content.indexOf("---", 3);
-        if (endIndex < 0) {
-            return null;
-        }
-        
-        String frontmatter = content.substring(3, endIndex).trim();
-        try {
-            Yaml yaml = new Yaml();
-            Map<String, Object> meta = yaml.load(frontmatter);
-            if (meta != null) {
-                return getStringValue(meta, "description");
-            }
-        } catch (Exception e) {
-            logger.debug("Could not parse SKILL.md frontmatter");
-        }
-        
-        return null;
-    }
-    
-    /**
-     * Parse MCP servers from the 'extensions' format (buildpack-transformed config).
-     * The buildpack converts mcpServers to extensions with type: streamable_http or stdio.
-     */
-    @SuppressWarnings("unchecked")
-    private List<McpServerInfo> parseMcpServersFromExtensions(Map<String, Object> config) {
-        Object extensionsObj = config.get("extensions");
-        if (!(extensionsObj instanceof Map<?, ?> extensionsMap)) {
-            return List.of();
-        }
-        
-        List<McpServerInfo> servers = new ArrayList<>();
-        for (Map.Entry<?, ?> entry : extensionsMap.entrySet()) {
-            String name = entry.getKey().toString();
-            if (!(entry.getValue() instanceof Map<?, ?> extMap)) {
-                continue;
-            }
-            
-            Map<String, Object> ext = (Map<String, Object>) extMap;
-            String type = getStringValue(ext, "type");
-            
-            // Skip builtin extensions - only include MCP servers
-            if ("builtin".equals(type)) {
-                continue;
-            }
-            
-            // streamable_http or stdio are MCP server types
-            if ("streamable_http".equals(type) || "stdio".equals(type)) {
-                String url = getStringValue(ext, "uri");
-                if (url == null) {
-                    url = getStringValue(ext, "url");
-                }
-                String command = getStringValue(ext, "command");
-                
-                // Parse args
-                List<String> args = null;
-                Object argsObj = ext.get("args");
-                if (argsObj instanceof List<?> argsList) {
-                    args = new ArrayList<>();
-                    for (Object arg : argsList) {
-                        if (arg != null) {
-                            args.add(arg.toString());
-                        }
-                    }
-                }
-                
-                // Parse env
-                Map<String, String> env = null;
-                Object envObj = ext.get("env");
-                if (envObj instanceof Map<?, ?> envMap) {
-                    env = new HashMap<>();
-                    for (Map.Entry<?, ?> envEntry : envMap.entrySet()) {
-                        if (envEntry.getKey() != null && envEntry.getValue() != null) {
-                            env.put(envEntry.getKey().toString(), envEntry.getValue().toString());
-                        }
-                    }
-                }
-                
-                servers.add(new McpServerInfo(name, type, url, command, args, env));
-            }
-        }
-        
-        return servers;
-    }
-    
-    /**
-     * Parse skills from the configuration.
-     */
-    @SuppressWarnings("unchecked")
-    private List<SkillInfo> parseSkills(Map<String, Object> config) {
-        Object skillsObj = config.get("skills");
-        if (!(skillsObj instanceof List<?> skillsList)) {
-            return List.of();
-        }
-        
-        List<SkillInfo> skills = new ArrayList<>();
-        for (Object item : skillsList) {
-            if (item instanceof Map<?, ?> skillMap) {
-                Map<String, Object> skill = (Map<String, Object>) skillMap;
-                String name = getStringValue(skill, "name");
-                if (name == null || name.isEmpty()) {
-                    continue;
-                }
-                
-                String description = getStringValue(skill, "description");
-                String path = getStringValue(skill, "path");
-                String source = getStringValue(skill, "source");
-                String branch = getStringValue(skill, "branch");
-                
-                // Determine source type
-                String sourceType;
-                String repository = null;
-                if (source != null && !source.isEmpty()) {
-                    // Git-based skill
-                    sourceType = "git";
-                    repository = source;
-                } else if (path != null && !path.isEmpty()) {
-                    // File-based skill
-                    sourceType = "file";
-                } else {
-                    // Inline skill
-                    sourceType = "inline";
-                }
-                
-                skills.add(new SkillInfo(name, description, sourceType, path, repository, branch));
-            }
-        }
-        
-        return skills;
-    }
-    
-    /**
-     * Parse MCP servers from the configuration.
-     */
-    @SuppressWarnings("unchecked")
-    private List<McpServerInfo> parseMcpServers(Map<String, Object> config) {
-        Object serversObj = config.get("mcpServers");
-        if (!(serversObj instanceof List<?> serversList)) {
-            return List.of();
-        }
-        
-        List<McpServerInfo> servers = new ArrayList<>();
-        for (Object item : serversList) {
-            if (item instanceof Map<?, ?> serverMap) {
-                Map<String, Object> server = (Map<String, Object>) serverMap;
-                String name = getStringValue(server, "name");
-                if (name == null || name.isEmpty()) {
-                    continue;
-                }
-                
-                String type = getStringValue(server, "type");
-                String url = getStringValue(server, "url");
-                String command = getStringValue(server, "command");
-                
-                // Parse args
-                List<String> args = null;
-                Object argsObj = server.get("args");
-                if (argsObj instanceof List<?> argsList) {
-                    args = new ArrayList<>();
-                    for (Object arg : argsList) {
-                        if (arg != null) {
-                            args.add(arg.toString());
-                        }
-                    }
-                }
-                
-                // Parse env
-                Map<String, String> env = null;
-                Object envObj = server.get("env");
-                if (envObj instanceof Map<?, ?> envMap) {
-                    env = new HashMap<>();
-                    for (Map.Entry<?, ?> entry : envMap.entrySet()) {
-                        if (entry.getKey() != null && entry.getValue() != null) {
-                            env.put(entry.getKey().toString(), entry.getValue().toString());
-                        }
-                    }
-                }
-                
-                servers.add(new McpServerInfo(name, type, url, command, args, env));
-            }
-        }
-        
-        return servers;
-    }
-    
-    /**
-     * Safely get a string value from a map.
-     */
-    private String getStringValue(Map<String, Object> map, String key) {
-        Object value = map.get(key);
-        return value != null ? value.toString() : null;
-    }
-
-    // ==================== Session Management ====================
-
-    @Override
-    public String executeInSession(String sessionName, String prompt, boolean resume) {
-        return executeInSession(sessionName, prompt, resume, GooseOptions.defaults());
-    }
-
-    @Override
-    public String executeInSession(String sessionName, String prompt, boolean resume, GooseOptions options) {
-        validateSessionName(sessionName);
-        validatePrompt(prompt);
-        Objects.requireNonNull(options, "Options cannot be null");
-
-        logger.debug("Executing Goose in session '{}', resume={}, prompt length: {}", 
-            sessionName, resume, prompt.length());
-
-        List<String> command = buildSessionCommand(sessionName, prompt, resume, options);
-        ProcessBuilder pb = new ProcessBuilder(command);
-
-        // Set working directory if specified
-        if (options.workingDirectory() != null) {
-            pb.directory(options.workingDirectory().toFile());
-        }
-
-        // Add environment variables to subprocess
-        Map<String, String> env = pb.environment();
-        env.putAll(baseEnvironment);
-        env.putAll(options.additionalEnv());
-        applyOpenAiCompatibleEnv(env, options);
-
-        // CRITICAL: Redirect stderr to stdout to prevent buffer deadlock
-        pb.redirectErrorStream(true);
-
-        try {
-            Process process = pb.start();
-
-            // CRITICAL: Close stdin immediately so CLI doesn't wait for input
-            process.getOutputStream().close();
-
-            // Read output
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                    logger.debug("Goose session output: {}", line);
-                }
-            }
-
-            // Wait for process to complete with timeout
-            boolean finished = process.waitFor(
-                    options.timeout().toMillis(),
-                    TimeUnit.MILLISECONDS
-            );
-
-            if (!finished) {
-                logger.error("Goose session command timed out after {}", options.timeout());
-                process.destroyForcibly();
-                throw new TimeoutException("Goose session execution timed out after " + options.timeout());
-            }
-
-            int exitCode = process.exitValue();
-            if (exitCode != 0) {
-                String outputStr = output.toString();
-                logger.error("Goose session failed with exit code: {}, output: {}", exitCode, outputStr);
-                throw new GooseExecutionException(
-                        "Goose session failed with exit code: " + exitCode,
-                        exitCode,
-                        outputStr
-                );
-            }
-
-            String result = filterGooseBanner(output.toString());
-            logger.info("Goose session '{}' executed successfully, output length: {}", sessionName, result.length());
-            return result;
-
-        } catch (IOException e) {
-            logger.error("Failed to execute Goose session", e);
-            throw new GooseExecutionException("Failed to execute Goose session", e);
-        } catch (InterruptedException e) {
-            logger.error("Goose session execution interrupted", e);
-            Thread.currentThread().interrupt();
-            throw new GooseExecutionException("Goose session execution interrupted", e);
-        } catch (TimeoutException e) {
-            throw new GooseExecutionException("Goose session execution timed out", e);
-        }
-    }
-
-    @Override
-    public Stream<String> executeInSessionStreaming(String sessionName, String prompt, boolean resume) {
-        return executeInSessionStreaming(sessionName, prompt, resume, GooseOptions.defaults());
-    }
-
-    @Override
-    public Stream<String> executeInSessionStreaming(String sessionName, String prompt, boolean resume, GooseOptions options) {
-        validateSessionName(sessionName);
-        validatePrompt(prompt);
-        Objects.requireNonNull(options, "Options cannot be null");
-
-        logger.debug("Starting streaming session '{}', resume={}, prompt length: {}", 
-            sessionName, resume, prompt.length());
-
-        List<String> command = buildSessionCommand(sessionName, prompt, resume, options);
-        ProcessBuilder pb = new ProcessBuilder(command);
-
-        // Set working directory if specified
-        if (options.workingDirectory() != null) {
-            pb.directory(options.workingDirectory().toFile());
-        }
-
-        // Add environment variables to subprocess
-        Map<String, String> env = pb.environment();
-        env.putAll(baseEnvironment);
-        env.putAll(options.additionalEnv());
-        applyOpenAiCompatibleEnv(env, options);
-
-        // CRITICAL: Redirect stderr to stdout to prevent buffer deadlock
-        pb.redirectErrorStream(true);
-
-        try {
-            Process process = pb.start();
-
-            // CRITICAL: Close stdin immediately so CLI doesn't wait for input
-            process.getOutputStream().close();
-
-            // Create streaming handle for resource management
-            StreamingProcessHandle handle = new StreamingProcessHandle(process, options.timeout());
-
-            // Create stream that reads lines as they arrive
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream())
-            );
-
-                    // Return stream with proper cleanup handlers, filtering out banner lines
-                    return reader.lines()
-                            .filter(line -> !isGooseBannerLine(line))
-                            .onClose(() -> {
-                                logger.debug("Session stream closed, cleaning up resources");
-                                handle.close();
-                                try {
-                                    reader.close();
-                                } catch (IOException e) {
-                                    logger.warn("Error closing reader", e);
-                                }
-                            });
-
-        } catch (IOException e) {
-            logger.error("Failed to start streaming session execution", e);
-            throw new GooseExecutionException("Failed to start Goose streaming session", e);
-        }
-    }
-
-    // ==================== Streaming JSON Support ====================
-
-    @Override
-    public Stream<String> executeInSessionStreamingJson(String sessionName, String prompt, boolean resume) {
-        return executeInSessionStreamingJson(sessionName, prompt, resume, GooseOptions.defaults());
-    }
-
-    @Override
-    public Stream<String> executeInSessionStreamingJson(String sessionName, String prompt, boolean resume, GooseOptions options) {
-        validateSessionName(sessionName);
-        validatePrompt(prompt);
-        Objects.requireNonNull(options, "Options cannot be null");
-
-        logger.debug("Starting streaming JSON session '{}', resume={}, prompt length: {}", 
-            sessionName, resume, prompt.length());
-
-        List<String> command = buildSessionCommandWithStreamJson(sessionName, prompt, resume, options);
-        ProcessBuilder pb = new ProcessBuilder(command);
-
-        // Set working directory if specified
-        if (options.workingDirectory() != null) {
-            pb.directory(options.workingDirectory().toFile());
-        }
-
-        // Add environment variables to subprocess
-        Map<String, String> env = pb.environment();
-        env.putAll(baseEnvironment);
-        env.putAll(options.additionalEnv());
-        applyOpenAiCompatibleEnv(env, options);
-        
-        // Enable debug mode and log key environment variables
-        env.put("GOOSE_DEBUG", "true");
-        env.put("RUST_LOG", "goose=debug,goose_cli=debug");
-        
-        // Log all OpenAI-related env vars with detailed info
+    private void logEnvironmentDetails(String sessionName, Map<String, String> env) {
         logger.info("Session '{}': Subprocess env (FULL):", sessionName);
         logger.info("  OPENAI_API_KEY: present={}, length={}, first3chars={}", 
             env.containsKey("OPENAI_API_KEY"),
@@ -941,7 +490,6 @@ public class GooseExecutorImpl implements GooseExecutor, AutoCloseable {
         logger.info("  GOOSE_DEBUG={}", env.get("GOOSE_DEBUG"));
         logger.info("  HOME={}", env.get("HOME"));
         
-        // DIAGNOSTIC: Print actual first 10 chars of API key if it looks like a JWT (starts with 'ey')
         String apiKey = env.get("OPENAI_API_KEY");
         if (apiKey != null && apiKey.length() > 10) {
             String prefix = apiKey.substring(0, Math.min(10, apiKey.length()));
@@ -949,378 +497,6 @@ public class GooseExecutorImpl implements GooseExecutor, AutoCloseable {
                 prefix + "...", 
                 apiKey.startsWith("ey"));
         }
-
-        // CRITICAL: Redirect stderr to stdout to prevent buffer deadlock
-        pb.redirectErrorStream(true);
-
-        try {
-            Process process = pb.start();
-
-            // CRITICAL: Close stdin immediately so CLI doesn't wait for input
-            process.getOutputStream().close();
-
-            // Create streaming handle for resource management
-            StreamingProcessHandle handle = new StreamingProcessHandle(process, options.timeout());
-
-            // Create stream that reads lines as they arrive
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream())
-            );
-
-            // Return stream with proper cleanup handlers
-            // Filter to only include JSON lines (start with '{')
-            return reader.lines()
-                    .peek(line -> logger.debug("Goose raw output: {}", line))
-                    .filter(line -> line.startsWith("{"))
-                    .onClose(() -> {
-                        logger.info("Streaming JSON session closed, cleaning up resources");
-                        handle.close();
-                        try {
-                            reader.close();
-                        } catch (IOException e) {
-                            logger.warn("Error closing reader", e);
-                        }
-                        // Log exit code for debugging
-                        if (!process.isAlive()) {
-                            logger.info("Goose process exited with code: {}", process.exitValue());
-                        }
-                    });
-
-        } catch (IOException e) {
-            logger.error("Failed to start streaming JSON session execution", e);
-            throw new GooseExecutionException("Failed to start Goose streaming JSON session", e);
-        }
-    }
-
-    /**
-     * Build the command line arguments for a named Goose session with streaming JSON output.
-     * <p>
-     * Uses: goose run -n "session-name" [-r] --provider X --model Y -t "prompt" --output-format stream-json --max-turns N
-     * </p>
-     */
-    private List<String> buildSessionCommandWithStreamJson(String sessionName, String prompt, boolean resume, GooseOptions options) {
-        logger.info("Building streaming JSON session command: session='{}', resume={}, promptLength={}", 
-            sessionName, resume, prompt.length());
-        
-        List<String> command = new ArrayList<>();
-        command.add(goosePath);
-        command.add("run");
-        
-        // Add session name
-        command.add("-n");
-        command.add(sessionName);
-        
-        // Add resume flag if continuing an existing session
-        if (resume) {
-            command.add("-r");
-            logger.info("Session '{}': Adding resume flag (-r)", sessionName);
-        } else {
-            logger.info("Session '{}': New session (no resume flag)", sessionName);
-        }
-        
-        // Resolve provider: options > GOOSE_PROVIDER env var
-        String provider = options.provider();
-        if (provider == null || provider.isEmpty()) {
-            provider = System.getenv("GOOSE_PROVIDER");
-        }
-        if (provider != null && !provider.isEmpty()) {
-            command.add("--provider");
-            command.add(provider);
-            logger.debug("Session '{}': Using provider '{}'", sessionName, provider);
-        }
-        
-        // Resolve model: options > GOOSE_MODEL env var
-        String model = options.model();
-        if (model == null || model.isEmpty()) {
-            model = System.getenv("GOOSE_MODEL");
-        }
-        if (model != null && !model.isEmpty()) {
-            command.add("--model");
-            command.add(model);
-            logger.debug("Session '{}': Using model '{}'", sessionName, model);
-        }
-        
-        // Add the prompt using -t flag
-        command.add("-t");
-        command.add(prompt);
-
-        // CRITICAL: Enable streaming JSON output for token-level streaming
-        command.add("--output-format");
-        command.add("stream-json");
-
-        // Add max-turns to prevent runaway sessions
-        command.add("--max-turns");
-        command.add(String.valueOf(options.maxTurns()));
-
-        // Log the full command
-        String promptPreview = prompt.length() > 50 ? prompt.substring(0, 50) + "..." : prompt;
-        logger.info("Session '{}': FULL command: {}", 
-            sessionName, 
-            String.join(" ", command));
-        logger.info("Session '{}': Prompt preview: '{}'", sessionName, promptPreview);
-
-        return command;
-    }
-
-    // ==================== Private Utility Methods ====================
-
-    /**
-     * Build the command line arguments for Goose CLI.
-     * <p>
-     * Goose uses: goose session --text "prompt" --max-turns N
-     * </p>
-     */
-    private List<String> buildCommand(String prompt, GooseOptions options) {
-        List<String> command = new ArrayList<>();
-        command.add(goosePath);
-        command.add("session");
-        command.add("--text");
-        command.add(prompt);
-
-        // Add max-turns to prevent runaway sessions
-        command.add("--max-turns");
-        command.add(String.valueOf(options.maxTurns()));
-
-        return command;
-    }
-
-    /**
-     * Build the command line arguments for a named Goose session.
-     * <p>
-     * For new sessions: goose run -n "session-name" --provider X --model Y -t "prompt" --max-turns N
-     * For resuming:     goose run --resume -n "session-name" -t "prompt" --max-turns N
-     * </p>
-     * <p>
-     * Note: We use "goose run" instead of "goose session" because:
-     * - "goose session" starts an interactive REPL that waits for user input
-     * - "goose run" executes a task non-interactively and exits when complete
-     * </p>
-     * <p>
-     * IMPORTANT: Extensions are configured in ~/.config/goose/config.yaml (generated by buildpack),
-     * NOT via CLI flags. Sessions started with --with-streamable-http-extension CLI flags cannot
-     * be resumed (Goose returns "Resume cancelled"). Extensions in config.yaml work correctly.
-     * </p>
-     * <p>
-     * Provider and model flags can be passed on resume if needed - they work correctly.
-     * </p>
-     */
-    private List<String> buildSessionCommand(String sessionName, String prompt, boolean resume, GooseOptions options) {
-        logger.info("Building session command: session='{}', resume={}, promptLength={}", 
-            sessionName, resume, prompt.length());
-        
-        List<String> command = new ArrayList<>();
-        command.add(goosePath);
-        command.add("run");
-        
-        // Add session name
-        command.add("-n");
-        command.add(sessionName);
-        
-        // Add resume flag if continuing an existing session
-        if (resume) {
-            command.add("-r");
-            logger.info("Session '{}': Adding resume flag (-r)", sessionName);
-        } else {
-            logger.info("Session '{}': New session (no resume flag)", sessionName);
-        }
-        
-        // Resolve provider: options > GOOSE_PROVIDER env var
-        // Provider and model can be passed on all invocations (new and resume) - they work correctly
-        String provider = options.provider();
-        if (provider == null || provider.isEmpty()) {
-            provider = System.getenv("GOOSE_PROVIDER");
-        }
-        if (provider != null && !provider.isEmpty()) {
-            command.add("--provider");
-            command.add(provider);
-            logger.debug("Session '{}': Using provider '{}'", sessionName, provider);
-        }
-        
-        // Resolve model: options > GOOSE_MODEL env var
-        String model = options.model();
-        if (model == null || model.isEmpty()) {
-            model = System.getenv("GOOSE_MODEL");
-        }
-        if (model != null && !model.isEmpty()) {
-            command.add("--model");
-            command.add(model);
-            logger.debug("Session '{}': Using model '{}'", sessionName, model);
-        }
-        
-        // NOTE: Extensions are configured in ~/.config/goose/config.yaml by the buildpack.
-        // We do NOT pass --with-streamable-http-extension flags via CLI because:
-        // 1. Sessions started with --with-streamable-http-extension CLI flags CANNOT be resumed
-        //    (Goose returns "Resume cancelled" regardless of whether you pass the same flags)
-        // 2. Extensions configured in config.yaml are loaded automatically and work with resume
-        // See: https://block.github.io/goose/docs/guides/configuration-files/
-        logger.info("Session '{}': Extensions loaded from config.yaml (not via CLI flags)", sessionName);
-        
-        // Add the prompt using -t flag
-        command.add("-t");
-        command.add(prompt);
-
-        // Add max-turns to prevent runaway sessions
-        command.add("--max-turns");
-        command.add(String.valueOf(options.maxTurns()));
-
-        // Log the full command (with prompt truncated for readability)
-        String promptPreview = prompt.length() > 50 ? prompt.substring(0, 50) + "..." : prompt;
-        logger.info("Session '{}': Full command: {} (prompt: '{}')", 
-            sessionName, 
-            String.join(" ", command.subList(0, command.size() - 3)), // Exclude -t, prompt, --max-turns, N
-            promptPreview);
-
-        return command;
-    }
-    
-    // NOTE: Extension loading via CLI flags (--with-streamable-http-extension) has been removed.
-    // Extensions are now configured in ~/.config/goose/config.yaml by the buildpack.
-    // This is required because Goose CLI has a bug where sessions started with 
-    // --with-streamable-http-extension flags cannot be resumed (always returns "Resume cancelled").
-    // Extensions in config.yaml work correctly with session resume.
-
-    /**
-     * Validate session name is not null or empty.
-     */
-    private void validateSessionName(String sessionName) {
-        if (sessionName == null || sessionName.trim().isEmpty()) {
-            throw new IllegalArgumentException("Session name cannot be null or empty");
-        }
-    }
-
-    /**
-     * Check if a line is part of the Goose CLI startup banner.
-     * <p>
-     * The Goose CLI outputs a startup banner like:
-     * <pre>
-     * starting session | provider: openai model: gpt-4o
-     *    session id: 20260108_1
-     *    working directory: /home/vcap/app
-     * </pre>
-     * Or for resumed sessions:
-     * <pre>
-     * resuming session | provider: openai model: gpt-4o
-     * </pre>
-     * </p>
-     */
-    private boolean isGooseBannerLine(String line) {
-        if (line == null) {
-            return false;
-        }
-        String trimmed = line.trim();
-        return trimmed.startsWith("starting session |") ||
-               trimmed.startsWith("resuming session |") ||
-               trimmed.startsWith("session id:") ||
-               trimmed.startsWith("working directory:");
-    }
-
-    /**
-     * Filter out Goose CLI banner/startup lines from output.
-     * The banner appears at the start of each command invocation and includes:
-     * - "starting session | ..." or "resuming session | ..."
-     * - "session id: ..."
-     * - "working directory: ..."
-     */
-    private String filterGooseBanner(String output) {
-        if (output == null || output.isEmpty()) {
-            return output;
-        }
-        
-        StringBuilder filtered = new StringBuilder();
-        String[] lines = output.split("\n");
-        boolean inBanner = true;
-        
-        for (String line : lines) {
-            if (inBanner) {
-                // Skip banner lines and empty lines at the start
-                if (isGooseBannerLine(line) || line.trim().isEmpty()) {
-                    continue;
-                }
-                // First non-banner, non-empty line - we're past the banner
-                inBanner = false;
-            }
-            
-            filtered.append(line).append("\n");
-        }
-        
-        // Trim trailing newline
-        String result = filtered.toString();
-        if (result.endsWith("\n")) {
-            result = result.substring(0, result.length() - 1);
-        }
-        
-        return result;
-    }
-
-    /**
-     * Build base environment variables from system environment.
-     */
-    private Map<String, String> buildBaseEnvironment() {
-        Map<String, String> apiKeys = new HashMap<>();
-
-        // Collect all provider API keys
-        copyEnvIfPresent(apiKeys, "ANTHROPIC_API_KEY");
-        copyEnvIfPresent(apiKeys, "OPENAI_API_KEY");
-        copyEnvIfPresent(apiKeys, "GOOGLE_API_KEY");
-        copyEnvIfPresent(apiKeys, "DATABRICKS_HOST");
-        copyEnvIfPresent(apiKeys, "DATABRICKS_TOKEN");
-        copyEnvIfPresent(apiKeys, "OLLAMA_HOST");
-
-        if (!hasProviderCredentials()) {
-            logger.warn("No LLM provider credentials found in environment");
-        }
-
-        return buildEnvironment(apiKeys);
-    }
-
-    /**
-     * Build environment variables with explicit API keys.
-     */
-    private Map<String, String> buildEnvironment(Map<String, String> apiKeys) {
-        Map<String, String> env = new HashMap<>(apiKeys);
-
-        // Pass HOME directory (needed for Goose config)
-        String home = System.getenv("HOME");
-        if (home != null && !home.isEmpty()) {
-            env.put("HOME", home);
-        }
-
-        // Pass Goose provider/model settings if set
-        copyEnvIfPresent(env, "GOOSE_PROVIDER");
-        copyEnvIfPresent(env, "GOOSE_MODEL");
-        copyEnvIfPresent(env, "GOOSE_PROVIDER__TYPE");
-        copyEnvIfPresent(env, "GOOSE_PROVIDER__MODEL");
-
-        return env;
-    }
-
-    /**
-     * Copy environment variable if present.
-     */
-    private void copyEnvIfPresent(Map<String, String> env, String key) {
-        String value = System.getenv(key);
-        if (value != null && !value.isEmpty()) {
-            env.put(key, value);
-        }
-    }
-
-    /**
-     * Check if any provider credentials are available.
-     */
-    private boolean hasProviderCredentials() {
-        return isEnvSet("ANTHROPIC_API_KEY") ||
-                isEnvSet("OPENAI_API_KEY") ||
-                isEnvSet("GOOGLE_API_KEY") ||
-                (isEnvSet("DATABRICKS_HOST") && isEnvSet("DATABRICKS_TOKEN")) ||
-                isEnvSet("OLLAMA_HOST");
-    }
-
-    /**
-     * Check if an environment variable is set and non-empty.
-     */
-    private boolean isEnvSet(String name) {
-        String value = System.getenv(name);
-        return value != null && !value.isEmpty();
     }
 
     /**
@@ -1346,168 +522,22 @@ public class GooseExecutorImpl implements GooseExecutor, AutoCloseable {
     }
 
     /**
-     * Apply OpenAI-compatible environment variables from GooseOptions.
-     * <p>
-     * When using OpenAI-compatible endpoints (e.g., GenAI services), the API key
-     * and base URL need to be passed as environment variables to the Goose CLI.
-     * </p>
-     * <p>
-     * <strong>SSE Normalization:</strong> When a custom base URL is specified,
-     * this method automatically routes requests through an {@link SseNormalizingProxy}
-     * to fix SSE format incompatibilities with some GenAI proxies.
-     * </p>
-     *
-     * @param env the environment map to update
-     * @param options the GooseOptions containing apiKey and baseUrl
+     * Validate session name is not null or empty.
      */
-    private void applyOpenAiCompatibleEnv(Map<String, String> env, GooseOptions options) {
-        boolean hasApiKey = options.apiKey() != null && !options.apiKey().isEmpty();
-        boolean hasBaseUrl = options.baseUrl() != null && !options.baseUrl().isEmpty();
-        
-        // Log the current environment state before changes
-        String existingOpenAiKey = env.get("OPENAI_API_KEY");
-        String existingOpenAiHost = env.get("OPENAI_HOST");
-        logger.info("Before apply - OPENAI_API_KEY present: {}, OPENAI_HOST: {}", 
-                existingOpenAiKey != null, existingOpenAiHost);
-        
-        if (hasApiKey && hasBaseUrl) {
-            // Use SSE normalizing proxy to fix GenAI proxy format issues
-            String proxyUrl = getOrCreateSseProxy(options.baseUrl(), options.apiKey());
-            
-            if (proxyUrl != null) {
-                // Route through local proxy - proxy handles auth
-                // Use a valid-looking dummy key so Goose CLI doesn't reject it during validation
-                // The real API key is handled by the proxy
-                env.put("OPENAI_HOST", proxyUrl);
-                env.put("OPENAI_API_KEY", "sk-proxy-handled-by-sse-normalizing-proxy");
-                logger.info("Using SSE normalizing proxy: {} -> {}", proxyUrl, options.baseUrl());
-            } else {
-                // Fallback to direct connection if proxy fails to start
-                env.put("OPENAI_API_KEY", options.apiKey());
-                env.put("OPENAI_HOST", options.baseUrl());
-                logger.warn("SSE proxy unavailable, using direct connection to: {}", options.baseUrl());
-            }
-        } else if (hasApiKey) {
-            env.put("OPENAI_API_KEY", options.apiKey());
-            logger.info("Applied OPENAI_API_KEY from GooseOptions (length: {})", options.apiKey().length());
-        } else if (hasBaseUrl) {
-            env.put("OPENAI_HOST", options.baseUrl());
-            logger.info("Applied OPENAI_HOST from GooseOptions: {}", options.baseUrl());
-        } else {
-            logger.debug("No OPENAI_API_KEY or OPENAI_HOST in GooseOptions, using environment defaults");
-        }
-        
-        // Log final state
-        logger.info("After apply - OPENAI_HOST in env: {}", env.get("OPENAI_HOST"));
-    }
-    
-    /**
-     * Gets or creates the SSE normalizing proxy for the given upstream URL.
-     * <p>
-     * The proxy is lazily initialized and reused across requests. If the upstream URL
-     * changes, the existing proxy is stopped and a new one is created.
-     * </p>
-     *
-     * @param upstreamUrl the upstream GenAI service URL
-     * @param apiKey the API key for authentication
-     * @return the local proxy URL, or null if the proxy could not be started
-     */
-    private String getOrCreateSseProxy(String upstreamUrl, String apiKey) {
-        synchronized (proxyLock) {
-            // Check if we can reuse existing proxy
-            if (sseProxy != null && sseProxy.isRunning()) {
-                // Proxy is running - reuse it
-                // Note: If upstream URL changed, we should restart, but for simplicity
-                // we assume it doesn't change during the executor's lifetime
-                return sseProxy.getProxyUrl();
-            }
-            
-            // Create and start new proxy
-            try {
-                sseProxy = new SseNormalizingProxy(upstreamUrl, apiKey);
-                sseProxy.start();
-                
-                // Register shutdown hook to clean up proxy
-                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                    if (sseProxy != null) {
-                        sseProxy.stop();
-                    }
-                }, "sse-proxy-shutdown"));
-                
-                return sseProxy.getProxyUrl();
-            } catch (Exception e) {
-                logger.error("Failed to start SSE normalizing proxy", e);
-                return null;
-            }
-        }
-    }
-    
-    /**
-     * Closes this executor and releases resources including the SSE proxy.
-     */
-    @Override
-    public void close() {
-        synchronized (proxyLock) {
-            if (sseProxy != null) {
-                logger.info("Closing SSE normalizing proxy");
-                sseProxy.stop();
-                sseProxy = null;
-            }
+    private void validateSessionName(String sessionName) {
+        if (sessionName == null || sessionName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Session name cannot be null or empty");
         }
     }
 
     /**
-     * Inner class to manage streaming process lifecycle and timeout enforcement.
+     * Close a reader quietly, logging any errors.
      */
-    private static class StreamingProcessHandle implements AutoCloseable {
-        private final Process process;
-        private final ScheduledFuture<?> timeoutTask;
-        private final AtomicBoolean closed = new AtomicBoolean(false);
-
-        public StreamingProcessHandle(Process process, java.time.Duration timeout) {
-            this.process = process;
-
-            // Schedule timeout task to forcibly destroy process if it runs too long
-            this.timeoutTask = timeoutExecutor.schedule(() -> {
-                if (process.isAlive()) {
-                    logger.warn("Streaming process timed out after {}, forcibly destroying", timeout);
-                    process.destroyForcibly();
-                }
-            }, timeout.toMillis(), TimeUnit.MILLISECONDS);
-
-            logger.debug("Created streaming process handle with timeout: {}", timeout);
-        }
-
-        @Override
-        public void close() {
-            if (closed.compareAndSet(false, true)) {
-                logger.debug("Closing streaming process handle");
-
-                // Cancel timeout task
-                timeoutTask.cancel(false);
-
-                // Destroy process if still alive
-                if (process.isAlive()) {
-                    logger.debug("Process still alive, destroying gracefully");
-                    process.destroy();
-
-                    // Give it a moment to terminate gracefully
-                    try {
-                        boolean terminated = process.waitFor(1, TimeUnit.SECONDS);
-                        if (!terminated) {
-                            logger.warn("Process did not terminate gracefully, forcing");
-                            process.destroyForcibly();
-                        }
-                    } catch (InterruptedException e) {
-                        logger.warn("Interrupted while waiting for process termination", e);
-                        Thread.currentThread().interrupt();
-                        process.destroyForcibly();
-                    }
-                } else {
-                    logger.debug("Process already terminated with exit code: {}", process.exitValue());
-                }
-            }
+    private void closeQuietly(BufferedReader reader) {
+        try {
+            reader.close();
+        } catch (IOException e) {
+            logger.warn("Error closing reader", e);
         }
     }
 }
-
