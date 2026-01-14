@@ -102,7 +102,7 @@ EOF
 
 # Parse VCAP_SERVICES and extract MCP server bindings
 # Returns JSON array of MCP servers to stdout
-# Looks for services with "mcpStreamableURL" tag
+# Looks for services with "mcp" tag
 parse_vcap_services_mcp_servers() {
     local vcap_services="${VCAP_SERVICES:-}"
 
@@ -142,11 +142,11 @@ for service_type, service_instances in vcap_services.items():
         if not isinstance(instance, dict):
             continue
         
-        # Check if this service has the mcpStreamableURL tag
+        # Check if this service has the "mcp" tag
         tags = instance.get('tags', [])
         has_mcp_tag = False
         for tag in tags:
-            if isinstance(tag, str) and 'mcp' in tag.lower():
+            if isinstance(tag, str) and tag.lower() == 'mcp':
                 has_mcp_tag = True
                 break
         
