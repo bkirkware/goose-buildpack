@@ -146,28 +146,20 @@ The buildpack automatically discovers and configures MCP servers from Cloud Foun
 - The service credentials must include a `uri` or `url` field
 - Optional: `headers` field in credentials for authentication
 
-**Example Service Binding:**
+When creating the service instance, ensure it's tagged with `mcp`.
 
-```yaml
-# manifest.yml
-applications:
-- name: goose-agent-chat
-  services:
-    - my-mcp-server
-```
-
-When creating the service instance, ensure it's tagged with `mcp`:
-
-```bash
-cf create-user-provided-service my-mcp-server \
-  -p '{"uri":"https://mcp.example.com","headers":{"Authorization":"Bearer token"}}' \
-  -t mcp
-```
-
-Or for published services, tag the service instance:
+Example: MCP server published on the Cloud Foundry marketplace.
 
 ```bash
 cf create-service my-service my-plan my-mcp-server -t mcp
+```
+
+Example: MCP server created with a user-provided service.
+
+```bash
+cf create-user-provided-service my-mcp-server \
+  -p '{"uri":"https://my-mcp-server.apps.example.com","headers":{"Authorization":"Bearer token"}}' \
+  -t mcp
 ```
 
 The buildpack will automatically detect and configure the MCP server at runtime. Service bindings take precedence over manually configured MCP servers in `.goose-config.yml` - if a service binding has the same name as a config file server, the service binding will be used.
