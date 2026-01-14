@@ -484,13 +484,12 @@ with open(output_file, 'w') as f:
                 
                 # Add headers if present (from VCAP_SERVICES)
                 headers = server.get('headers', {})
-                if headers and isinstance(headers, dict):
-                    # Note: Goose config.yaml doesn't directly support headers in the extension config
-                    # Headers would need to be handled by the MCP server implementation
-                    # For now, we'll add a comment noting headers are available
-                    if headers:
-                        header_names = ', '.join(headers.keys())
-                        f.write(f"    # Headers available: {header_names}\n")
+                if headers and isinstance(headers, dict) and len(headers) > 0:
+                    f.write(f"    headers:\n")
+                    for header_name, header_value in headers.items():
+                        # Escape quotes in header values
+                        escaped_value = str(header_value).replace('"', '\\"')
+                        f.write(f"      {header_name}: \"{escaped_value}\"\n")
             else:
                 # Local stdio extension (default)
                 cmd = server.get('command', '')

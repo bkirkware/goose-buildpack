@@ -146,7 +146,7 @@ for vcap_server in vcap_mcp_servers:
         continue
     
     # Add the MCP server extension
-    config['extensions'][ext_id] = {
+    extension_config = {
         'name': vcap_server['name'],
         'description': f"MCP extension {vcap_server['name']} (from VCAP_SERVICES)",
         'enabled': True,
@@ -154,6 +154,13 @@ for vcap_server in vcap_mcp_servers:
         'type': 'streamable_http',
         'uri': vcap_server['uri']
     }
+    
+    # Add headers if present
+    headers = vcap_server.get('headers', {})
+    if headers and isinstance(headers, dict) and len(headers) > 0:
+        extension_config['headers'] = headers
+    
+    config['extensions'][ext_id] = extension_config
     
     merged_count += 1
     print(f"[goose-env] Added MCP server from VCAP_SERVICES: {vcap_server['name']}", file=sys.stderr)
