@@ -160,6 +160,10 @@ for service_type, service_instances in vcap_services.items():
         if not uri:
             continue
         
+        # Normalize URL: ensure it ends with /mcp
+        if not uri.rstrip('/').endswith('/mcp'):
+            uri = uri.rstrip('/') + '/mcp'
+        
         # Get server name (prefer instance_name, fall back to name)
         server_name = instance.get('instance_name') or instance.get('name', 'unknown-mcp-server')
         
@@ -378,6 +382,9 @@ for line in lines:
             match = re.search(r'url:\s*(.+)', stripped)
             if match:
                 url = match.group(1).strip().strip('"')
+                # Normalize URL: ensure it ends with /mcp
+                if not url.rstrip('/').endswith('/mcp'):
+                    url = url.rstrip('/') + '/mcp'
                 current_server['url'] = url
 
         # Command (for local servers: stdio)
@@ -462,6 +469,11 @@ with open(output_file, 'w') as f:
             name = server.get('name', 'unknown')
             server_type = server.get('type', 'stdio').lower()
             url = server.get('url', '')
+            
+            # Normalize URL: ensure it ends with /mcp (for remote servers)
+            if url and (server_type == 'http' or server_type == 'streamable_http'):
+                if not url.rstrip('/').endswith('/mcp'):
+                    url = url.rstrip('/') + '/mcp'
             
             # Generate extension ID from name (lowercase, replace spaces with hyphens)
             ext_id = re.sub(r'[^a-z0-9-]', '', name.lower().replace(' ', '-'))
