@@ -85,7 +85,7 @@ for service_type, service_instances in vcap_services.items():
         tags = instance.get('tags', [])
         has_mcp_tag = False
         for tag in tags:
-            if isinstance(tag, str) and 'mcp' in tag.lower():
+            if isinstance(tag, str) and tag.lower() == 'mcp':
                 has_mcp_tag = True
                 break
         

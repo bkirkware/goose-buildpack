@@ -133,6 +133,45 @@ goose:
         - [ ] Follows project style guide
 ```
 
+### MCP Server Auto-Configuration via Service Binding
+
+The buildpack automatically discovers and configures MCP servers from Cloud Foundry service bindings. When a service instance is bound to your application with the `mcp` tag, the buildpack will:
+
+1. Extract the MCP server URI from the service credentials
+2. Automatically add it to Goose's configuration as a `streamable_http` extension
+3. Make it available to Goose without manual configuration
+
+**Requirements:**
+- The service binding must be tagged with `mcp` (case-sensitive)
+- The service credentials must include a `uri` or `url` field
+- Optional: `headers` field in credentials for authentication
+
+**Example Service Binding:**
+
+```yaml
+# manifest.yml
+applications:
+- name: goose-agent-chat
+  services:
+    - my-mcp-server
+```
+
+When creating the service instance, ensure it's tagged with `mcp`:
+
+```bash
+cf create-user-provided-service my-mcp-server \
+  -p '{"uri":"https://mcp.example.com","headers":{"Authorization":"Bearer token"}}' \
+  -t mcp
+```
+
+Or for published services, tag the service instance:
+
+```bash
+cf create-service my-service my-plan my-mcp-server -t mcp
+```
+
+The buildpack will automatically detect and configure the MCP server at runtime. Service bindings take precedence over manually configured MCP servers in `.goose-config.yml` - if a service binding has the same name as a config file server, the service binding will be used.
+
 ## Skills
 
 Skills are reusable sets of instructions that teach Goose how to perform specific tasks. They follow the [Agent Skills](https://block.github.io/goose/docs/guides/context-engineering/using-skills) format compatible with Claude Desktop and other agents.
