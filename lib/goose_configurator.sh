@@ -100,6 +100,92 @@ EOF
     return 0
 }
 
+# Parse VCAP_SERVICES and extract MCP server bindings
+# Returns JSON array of MCP servers to stdout
+# Looks for services with "mcpStreamableURL" tag
+parse_vcap_services_mcp_servers() {
+    local vcap_services="${VCAP_SERVICES:-}"
+
+    if [ -z "${vcap_services}" ]; then
+        echo "[]"
+        return 1
+    fi
+
+    # Use Python to parse VCAP_SERVICES JSON
+    if command -v python3 > /dev/null 2>&1; then
+        python3 - <<'PYTHON_SCRIPT'
+import sys
+import json
+import os
+import re
+
+vcap_services_str = os.environ.get('VCAP_SERVICES', '{}')
+
+if not vcap_services_str:
+    print("[]")
+    sys.exit(0)
+
+try:
+    vcap_services = json.loads(vcap_services_str)
+except Exception as e:
+    print("[]", file=sys.stderr)
+    sys.exit(0)
+
+mcp_servers = []
+
+# Iterate through all service types
+for service_type, service_instances in vcap_services.items():
+    if not isinstance(service_instances, list):
+        continue
+    
+    for instance in service_instances:
+        if not isinstance(instance, dict):
+            continue
+        
+        # Check if this service has the mcpStreamableURL tag
+        tags = instance.get('tags', [])
+        has_mcp_tag = False
+        for tag in tags:
+            if isinstance(tag, str) and 'mcp' in tag.lower():
+                has_mcp_tag = True
+                break
+        
+        if not has_mcp_tag:
+            continue
+        
+        # Extract MCP server information
+        credentials = instance.get('credentials', {})
+        uri = credentials.get('uri') or credentials.get('url')
+        
+        if not uri:
+            continue
+        
+        # Get server name (prefer instance_name, fall back to name)
+        server_name = instance.get('instance_name') or instance.get('name', 'unknown-mcp-server')
+        
+        # Extract headers if present
+        headers = credentials.get('headers', {})
+        
+        # Create MCP server entry
+        mcp_server = {
+            'name': server_name,
+            'type': 'streamable_http',
+            'url': uri,
+            'headers': headers
+        }
+        
+        mcp_servers.append(mcp_server)
+        print(f"       Found MCP server from VCAP_SERVICES: {server_name}", file=sys.stderr)
+
+print(json.dumps(mcp_servers, indent=2))
+PYTHON_SCRIPT
+        return $?
+    fi
+
+    echo "[]"
+    return 1
+}
+
 # Generate MCP server configuration for Goose
 # Creates config.yaml with extensions section in ~/.config/goose/
 # Goose uses config.yaml (not mcp_servers.json) for extension configuration
@@ -113,10 +199,29 @@ generate_mcp_config() {
 
     echo "-----> Configuring MCP servers as Goose extensions"
 
+    # Parse VCAP_SERVICES for MCP servers
+    local vcap_mcp_servers_file="${build_dir}/.goose-vcap-mcp-servers-temp.json"
+    parse_vcap_services_mcp_servers > "${vcap_mcp_servers_file}" 2>&1
+    local vcap_servers_count=0
+    if [ -f "${vcap_mcp_servers_file}" ] && [ -s "${vcap_mcp_servers_file}" ]; then
+        vcap_servers_count=$(python3 -c "import json; data=json.load(open('${vcap_mcp_servers_file}')); print(len(data))" 2>/dev/null || echo "0")
+        if [ "${vcap_servers_count}" -gt 0 ]; then
+            echo "       Found ${vcap_servers_count} MCP server(s) from VCAP_SERVICES"
+        fi
+    fi
+
     # Check for config file with MCP servers
     if [ -n "${GOOSE_CONFIG_FILE}" ] && [ -f "${GOOSE_CONFIG_FILE}" ]; then
-        if generate_goose_config_yaml "${GOOSE_CONFIG_FILE}" "${config_file}"; then
+        if generate_goose_config_yaml "${GOOSE_CONFIG_FILE}" "${config_file}" "${vcap_mcp_servers_file}"; then
             echo "       Created ${config_file} with extensions"
+            rm -f "${vcap_mcp_servers_file}"
+            return 0
+        fi
+    elif [ "${vcap_servers_count}" -gt 0 ]; then
+        # Only VCAP_SERVICES MCP servers, no config file
+        if generate_goose_config_yaml "" "${config_file}" "${vcap_mcp_servers_file}"; then
+            echo "       Created ${config_file} with VCAP_SERVICES MCP servers"
+            rm -f "${vcap_mcp_servers_file}"
             return 0
         fi
     fi
@@ -128,44 +233,71 @@ generate_mcp_config() {
 extensions: {}
 EOF
     echo "       Created minimal Goose configuration (no extensions configured)"
+    rm -f "${vcap_mcp_servers_file}"
     return 0
 }
 
 # Generate Goose config.yaml with extensions from .goose-config.yml
 # Goose CLI expects extensions in config.yaml format, not mcp_servers.json
+# Args: source_config output_file vcap_mcp_servers_file
 generate_goose_config_yaml() {
     local source_config=$1
     local output_file=$2
+    local vcap_mcp_servers_file="${3:-}"
 
-    if [ ! -f "${source_config}" ]; then
-        echo "       No source configuration file found: ${source_config}"
-        return 1
+    # If no source config and no VCAP_SERVICES, can't generate config
+    if [ -z "${source_config}" ] || [ ! -f "${source_config}" ]; then
+        if [ -z "${vcap_mcp_servers_file}" ] || [ ! -f "${vcap_mcp_servers_file}" ]; then
+            echo "       No source configuration file or VCAP_SERVICES MCP servers found"
+            return 1
+        fi
+        # Only VCAP_SERVICES MCP servers, no config file - still generate
+        source_config=""
     fi
 
-    # Check if file has mcpServers or extensions section
-    if ! grep -qE "(mcpServers|mcp-servers|extensions):" "${source_config}"; then
-        echo "       No MCP server or extension configuration found in ${source_config}"
-        return 1
+    # Check if file has mcpServers or extensions section (if config file exists)
+    if [ -n "${source_config}" ] && [ -f "${source_config}" ]; then
+        if ! grep -qE "(mcpServers|mcp-servers|extensions):" "${source_config}"; then
+            # No MCP config in file, but might have VCAP_SERVICES
+            if [ -z "${vcap_mcp_servers_file}" ] || [ ! -f "${vcap_mcp_servers_file}" ]; then
+                echo "       No MCP server or extension configuration found in ${source_config}"
+                return 1
+            fi
+        fi
     fi
 
     # Use Python for YAML parsing and config.yaml generation
     if command -v python3 > /dev/null 2>&1; then
-        python3 - "${source_config}" "${output_file}" <<'PYTHON_SCRIPT'
+        python3 - "${source_config}" "${output_file}" "${vcap_mcp_servers_file}" <<'PYTHON_SCRIPT'
 import sys
 import re
 import os
+import json
 
 if len(sys.argv) < 3:
     sys.exit(1)
 
-source_config = sys.argv[1]
+source_config = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else ""
 output_file = sys.argv[2]
+vcap_mcp_servers_file = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else ""
 
-try:
-    with open(source_config, 'r') as f:
-        lines = f.readlines()
-except Exception as e:
-    sys.exit(1)
+# Parse VCAP_SERVICES MCP servers if provided
+vcap_mcp_servers = []
+if vcap_mcp_servers_file and os.path.exists(vcap_mcp_servers_file):
+    try:
+        with open(vcap_mcp_servers_file, 'r') as f:
+            vcap_mcp_servers = json.load(f)
+    except Exception as e:
+        pass
+
+# Parse config file if provided
+lines = []
+if source_config and os.path.exists(source_config):
+    try:
+        with open(source_config, 'r') as f:
+            lines = f.readlines()
+    except Exception as e:
+        pass
 
 # Parse MCP servers from source config
 mcp_servers = []
@@ -266,6 +398,19 @@ if current_server and current_server.get('name'):
 if current_extension and current_extension.get('name'):
     builtin_extensions.append(current_extension)
 
+# Merge VCAP_SERVICES MCP servers with config file servers
+# VCAP_SERVICES servers take precedence (added after config file servers)
+for vcap_server in vcap_mcp_servers:
+    # Check if a server with the same name already exists
+    existing_names = {s.get('name', '').lower() for s in mcp_servers}
+    vcap_name = vcap_server.get('name', '').lower()
+    
+    if vcap_name and vcap_name not in existing_names:
+        mcp_servers.append(vcap_server)
+        print(f"       Added MCP server from VCAP_SERVICES: {vcap_server.get('name')}", file=sys.stderr)
+    elif vcap_name in existing_names:
+        print(f"       WARNING: MCP server '{vcap_server.get('name')}' from VCAP_SERVICES conflicts with config file, skipping", file=sys.stderr)
+
 # Generate Goose config.yaml with extensions
 # Format: https://block.github.io/goose/docs/getting-started/using-extensions/
 with open(output_file, 'w') as f:
@@ -336,6 +481,16 @@ with open(output_file, 'w') as f:
                 # Note: Goose expects 'uri' field, not 'url'!
                 f.write(f"    type: streamable_http\n")
                 f.write(f"    uri: \"{url}\"\n")
+                
+                # Add headers if present (from VCAP_SERVICES)
+                headers = server.get('headers', {})
+                if headers and isinstance(headers, dict):
+                    # Note: Goose config.yaml doesn't directly support headers in the extension config
+                    # Headers would need to be handled by the MCP server implementation
+                    # For now, we'll add a comment noting headers are available
+                    if headers:
+                        header_names = ', '.join(headers.keys())
+                        f.write(f"    # Headers available: {header_names}\n")
             else:
                 # Local stdio extension (default)
                 cmd = server.get('command', '')
