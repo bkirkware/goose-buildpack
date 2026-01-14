@@ -99,6 +99,10 @@ for service_type, service_instances in vcap_services.items():
         if not uri:
             continue
         
+        # Normalize URL: ensure it ends with /mcp
+        if not uri.rstrip('/').endswith('/mcp'):
+            uri = uri.rstrip('/') + '/mcp'
+        
         # Get server name (prefer instance_name, fall back to name)
         server_name = instance.get('instance_name') or instance.get('name', 'unknown-mcp-server')
         
